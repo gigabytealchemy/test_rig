@@ -1,0 +1,1 @@
+Coordinator and UI components will be added in Step 4–6.

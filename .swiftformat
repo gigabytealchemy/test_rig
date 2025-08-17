@@ -1,0 +1,5 @@
+--swiftversion 5.9
+--indent 4
+--stripunusedargs closure-only
+--self remove
+--ifdef no-indent
