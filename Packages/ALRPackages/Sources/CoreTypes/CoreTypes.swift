@@ -17,20 +17,20 @@ public struct AnalyzerInput: Sendable, Codable {
         if let range = selectedRange {
             let startOffset = fullText.distance(from: fullText.startIndex, to: range.lowerBound)
             let endOffset = fullText.distance(from: fullText.startIndex, to: range.upperBound)
-            self.selectedRangeStart = startOffset
-            self.selectedRangeEnd = endOffset
+            selectedRangeStart = startOffset
+            selectedRangeEnd = endOffset
         } else {
-            self.selectedRangeStart = nil
-            self.selectedRangeEnd = nil
+            selectedRangeStart = nil
+            selectedRangeEnd = nil
         }
         self.fallbackEmotion = fallbackEmotion
     }
-    
+
     public var selectedRange: Range<String.Index>? {
         guard let start = selectedRangeStart, let end = selectedRangeEnd else { return nil }
         let startIndex = fullText.index(fullText.startIndex, offsetBy: start)
         let endIndex = fullText.index(fullText.startIndex, offsetBy: end)
-        return startIndex..<endIndex
+        return startIndex ..< endIndex
     }
 
     public var selectedText: String {
