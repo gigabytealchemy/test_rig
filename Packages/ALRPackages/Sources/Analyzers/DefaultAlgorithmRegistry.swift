@@ -16,6 +16,7 @@ public struct DefaultAlgorithmRegistry: AlgorithmRegistry {
             EmotionRegexV1(),
             EmotionRegexV2(),
             EmotionTFIDFSeeded(),
+            EmotionProAnalyzer(),
 
             // New ALR analyzers
             ALR_EngineWrap(),

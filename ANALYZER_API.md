@@ -8,14 +8,15 @@ The TestRig analyzer system provides a flexible, concurrent framework for text a
 
 ### 1. Algorithm Categories
 
-Analyzers are grouped into four primary categories:
+Analyzers are grouped into five primary categories:
 
 ```swift
 public enum AlgorithmCategory: String, Codable, Sendable, CaseIterable {
-    case emotion = "Emotion"
-    case activeListening = "Active Listening"
-    case title = "Title"
-    case prompt = "Prompt"
+    case emotion
+    case alr  // Active Listening Response
+    case title
+    case prompt
+    case domains
 }
 ```
 
@@ -33,9 +34,10 @@ The input structure passed to all analyzers:
 
 ```swift
 public struct AnalyzerInput: Sendable, Codable {
-    public let fullText: String           // Complete text content
-    public let selectedRange: Range<String.Index>?  // Optional text selection
-    public let fallbackEmotion: String?   // Optional emotion context
+    public let fullText: String                      // Complete text content
+    public let selectedRange: Range<String.Index>?   // Optional text selection
+    public let fallbackEmotion: String?              // Optional emotion context
+    public let domains: [DomainScore]?               // Optional domain classifications
 }
 ```
 
@@ -43,7 +45,20 @@ public struct AnalyzerInput: Sendable, Codable {
 - `fullText`: The complete text to analyze
 - `selectedRange`: Optional user-selected text range for focused analysis
 - `fallbackEmotion`: Optional emotion context for emotion-dependent analyzers
+- `domains`: Optional array of domain classifications with confidence scores
 - `selectedText`: Computed property returning the selected text substring
+- `domainTuples`: Computed property converting domains to tuples for easier access
+
+### DomainScore
+
+Domain classification with confidence score:
+
+```swift
+public struct DomainScore: Codable, Sendable {
+    public let name: String    // Domain name (e.g., "Work", "Family")
+    public let score: Double   // Confidence score (0.0 to 1.0)
+}
+```
 
 ### AnalyzerOutput
 
@@ -89,6 +104,27 @@ public protocol Analyzer: Sendable {
 - **Timeouts**: Default 3-second timeout per analyzer (configurable)
 - **Stateless**: Analyzers should be stateless; use input/output for all data
 
+## Current Analyzers
+
+The TestRig currently includes 11 analyzers:
+
+### Emotion Analyzers
+1. **RuleEmotionAnalyzer** - Rule-based emotion detection
+2. **EmotionRegexV1** - Simple keyword/pattern scoring
+3. **EmotionRegexV2** - Enhanced with negation and intensifiers
+4. **EmotionTFIDFSeeded** - TF-IDF based emotion detection
+
+### Active Listening Response Analyzers
+5. **ActiveListeningAnalyzer** - Domain-aware active listening
+6. **ALR_EngineWrap** - Sentiment-aware engine wrapper
+7. **ALR_EngineWithPatternHint** - Pattern-based hints
+8. **ALR_EnginePro** - Production-level with 120+ rules
+
+### Other Analyzers
+9. **TitleAnalyzer** - Extract title from text
+10. **PromptAnalyzer** - Domain+emotion aware prompts
+11. **DomainAnalyzer** - Detect text domains
+
 ## Creating a New Analyzer
 
 ### Step 1: Create the Analyzer File
@@ -132,10 +168,23 @@ Add your analyzer to `Packages/ALRPackages/Sources/Analyzers/DefaultAlgorithmReg
 ```swift
 public struct DefaultAlgorithmRegistry: AlgorithmRegistry {
     public let analyzers: [Analyzer] = [
+        // Emotion analyzers
         RuleEmotionAnalyzer(),
+        EmotionRegexV1(),
+        EmotionRegexV2(),
+        EmotionTFIDFSeeded(),
+        
+        // Active Listening Response analyzers
         ActiveListeningAnalyzer(),
+        ALR_EngineWrap(),
+        ALR_EngineWithPatternHint(),
+        ALR_EnginePro(),
+        
+        // Other analyzers
         TitleAnalyzer(),
         PromptAnalyzer(),
+        DomainAnalyzer(),
+        
         YourAnalyzer() // Add your analyzer here
     ]
     
@@ -153,7 +202,8 @@ func testYourAnalyzer() throws {
     let input = AnalyzerInput(
         fullText: "Test text",
         selectedRange: nil,
-        fallbackEmotion: nil
+        fallbackEmotion: nil,
+        domains: nil
     )
     
     let output = try analyzer.analyze(input)
@@ -228,37 +278,39 @@ public struct SelectionAnalyzer: Analyzer {
 }
 ```
 
-### 3. Emotion-Context Analyzer
+### 3. Domain-Aware Analyzer
 
 ```swift
-public struct EmotionContextAnalyzer: Analyzer {
-    public let category: AlgorithmCategory = .emotion
-    public let name: String = "Emotion Context"
+public struct DomainAwareAnalyzer: Analyzer {
+    public let category: AlgorithmCategory = .prompt
+    public let name: String = "Domain Aware"
     
     public init() {}
     
     public func analyze(_ input: AnalyzerInput) throws -> AnalyzerOutput {
-        let baseEmotion = input.fallbackEmotion ?? "neutral"
-        let result = analyzeWithEmotion(input.fullText, emotion: baseEmotion)
+        // Check for high-confidence domain
+        let topDomain = input.domainTuples?.max(by: { $0.score < $1.score })
+        let domainName = (topDomain?.score ?? 0) >= 0.45 ? topDomain?.name : nil
+        
+        let emotion = input.fallbackEmotion ?? "neutral"
+        
+        var result: String
+        var metadata: [String: String] = ["emotion": emotion]
+        
+        if let domain = domainName {
+            result = "Analyzing \(domain) content with \(emotion) tone"
+            metadata["domain"] = domain
+            metadata["confidence"] = String(format: "%.2f", topDomain?.score ?? 0)
+        } else {
+            result = "General analysis with \(emotion) tone"
+        }
         
         return AnalyzerOutput(
             category: category,
             name: name,
             result: result,
-            metadata: ["baseEmotion": baseEmotion]
+            metadata: metadata
         )
-    }
-    
-    private func analyzeWithEmotion(_ text: String, emotion: String) -> String {
-        // Use emotion context to influence analysis
-        switch emotion.lowercased() {
-        case "happy", "joyful":
-            return "Positive tone detected with \(emotion) context"
-        case "sad", "melancholy":
-            return "Reflective tone detected with \(emotion) context"
-        default:
-            return "Neutral analysis with \(emotion) context"
-        }
     }
 }
 ```
@@ -391,7 +443,8 @@ final class YourAnalyzerTests: XCTestCase {
         let input = AnalyzerInput(
             fullText: text,
             selectedRange: range,
-            fallbackEmotion: nil
+            fallbackEmotion: nil,
+            domains: [("General", 0.5)]
         )
         
         let output = try analyzer.analyze(input)
@@ -403,7 +456,8 @@ final class YourAnalyzerTests: XCTestCase {
         let input = AnalyzerInput(
             fullText: "", // Invalid input
             selectedRange: nil,
-            fallbackEmotion: nil
+            fallbackEmotion: nil,
+            domains: nil
         )
         
         XCTAssertThrows(try analyzer.analyze(input))
@@ -444,6 +498,9 @@ A: No, analyzers should be stateless. Use input/output for all data transfer.
 
 **Q: How do I add a new category?**
 A: Add a new case to `AlgorithmCategory` enum in `CoreTypes.swift`. The UI will automatically create a new section.
+
+**Q: How do domains work?**
+A: The DomainAnalyzer detects domains (Work, Family, Relationships, Health, Money, School) and passes them to other analyzers via the `domains` field in AnalyzerInput. Domain-aware analyzers can adjust their responses based on the detected domain.
 
 **Q: Can analyzers call other analyzers?**
 A: Not directly. Each analyzer should be independent. Share common logic via utility functions.

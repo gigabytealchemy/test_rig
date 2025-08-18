@@ -198,4 +198,103 @@ final class NewAnalyzersTests: XCTestCase {
         // Should detect Family domain
         XCTAssertTrue(output.metadata["domains"]?.contains("Family") ?? false)
     }
+
+    // Test EmotionProAnalyzer
+    func testEmotionProAnalyzerJoyDetection() throws {
+        let analyzer = EmotionProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "I'm so grateful and proud of what we achieved today!",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        XCTAssertEqual(output.category, .emotion)
+        XCTAssertEqual(output.name, "Emotion • Rules Pro")
+        XCTAssertTrue(output.result.contains("Joy"))
+        XCTAssertTrue(output.result.contains("🙂"))
+        XCTAssertNotNil(output.metadata["scores"])
+    }
+
+    func testEmotionProAnalyzerFearDetection() throws {
+        let analyzer = EmotionProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "I'm worried about what might happen. I'm really anxious.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        XCTAssertTrue(output.result.contains("Fear"))
+        XCTAssertTrue(output.result.contains("😨"))
+    }
+
+    func testEmotionProAnalyzerContrastHandling() throws {
+        let analyzer = EmotionProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "I was happy initially, but I'm really angry about how it ended.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        // Should prioritize emotion after "but"
+        XCTAssertTrue(output.result.contains("Anger") || output.result.contains("😠"))
+    }
+
+    func testEmotionProAnalyzerMixedEmotions() throws {
+        let analyzer = EmotionProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "I feel both grateful and anxious about this opportunity.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        // Should detect mixed emotions when close scores
+        XCTAssertTrue(output.result.contains("Mixed") || output.result.contains("😵‍💫") ||
+                     output.result.contains("Joy") || output.result.contains("Fear"))
+    }
+
+    func testEmotionProAnalyzerWithSelection() throws {
+        let fullText = "The meeting went well. But I regret not calling back immediately."
+        let selectedStart = fullText.firstIndex(of: "I")!
+        let selectedEnd = fullText.endIndex
+        let range = selectedStart ..< selectedEnd
+
+        let input = AnalyzerInput(
+            fullText: fullText,
+            selectedRange: range,
+            fallbackEmotion: nil
+        )
+
+        let output = try EmotionProAnalyzer().analyze(input)
+        // Should analyze selected text which has regret
+        XCTAssertTrue(output.result.contains("Sadness") || output.result.contains("😢") ||
+                     output.result.contains("2"))
+    }
+
+    func testEmotionProAnalyzerNeutralText() throws {
+        let analyzer = EmotionProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "Today I made a note about the meeting schedule.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        XCTAssertTrue(output.result.contains("Neutral") || output.result.contains("😐"))
+    }
+
+    func testEmotionProAnalyzerEmptyText() throws {
+        let analyzer = EmotionProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        XCTAssertTrue(output.result.contains("Neutral") || output.result.contains("😐"))
+    }
 }
