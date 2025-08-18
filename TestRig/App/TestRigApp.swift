@@ -1,25 +1,32 @@
 import Analyzers
-import CoreTypes
 import SwiftUI
 
 @main
 struct TestRigApp: App {
-    var body: some Scene {
-        WindowGroup("ALR Test Rig") {
-            ContentView()
-                .frame(minWidth: 700, minHeight: 480)
-        }
-    }
-}
+    @StateObject private var coordinator =
+        Coordinator(registry: DefaultAlgorithmRegistry())
 
-struct ContentView: View {
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("ALR Test Rig")
-                .font(.largeTitle)
-            Text("Step 1: Project scaffold ready.")
-                .foregroundStyle(.secondary)
+    var body: some Scene {
+        WindowGroup("TestRig") {
+            HSplitView {
+                EditorPane()
+                    .environmentObject(coordinator)
+                    .frame(minWidth: 350)
+                ResultsDashboard()
+                    .environmentObject(coordinator)
+                    .frame(minWidth: 350)
+            }
+            .toolbar {
+                Button("Run All") {
+                    coordinator.runAll()
+                }
+                .disabled(coordinator.isRunning || coordinator.text.isEmpty)
+
+                Button("Cancel") {
+                    coordinator.cancel()
+                }
+                .disabled(!coordinator.isRunning)
+            }
         }
-        .padding()
     }
 }

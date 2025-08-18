@@ -64,7 +64,7 @@ final class Coordinator: ObservableObject {
                     self.resultsByCategory = grouped
                 }
             }
-            
+
             await MainActor.run {
                 self.isRunning = false
             }
