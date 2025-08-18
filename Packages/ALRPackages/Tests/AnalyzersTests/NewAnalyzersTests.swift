@@ -187,4 +187,80 @@ final class NewAnalyzersTests: XCTestCase {
         let output = try analyzer.analyze(input)
         XCTAssertTrue(output.result.contains("Neutral") || output.result.contains("😐"))
     }
+
+    // Test DomainProAnalyzer
+    func testDomainProAnalyzerWorkAndExercise() throws {
+        let analyzer = DomainProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "Ran before work this morning, then had a tough meeting with my boss.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        XCTAssertEqual(output.category, .domains)
+        XCTAssertEqual(output.name, "Domain • Rules Pro")
+        // Should detect both Exercise/Fitness and Work/Career
+        XCTAssertNotNil(output.metadata["ranked"])
+        XCTAssertTrue(output.metadata["ranked"]?.contains("Exercise/Fitness") ?? false)
+        XCTAssertTrue(output.metadata["ranked"]?.contains("Work/Career") ?? false)
+    }
+
+    func testDomainProAnalyzerFamilyAndFood() throws {
+        let analyzer = DomainProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "Had dinner with my sister and mom last night at a nice restaurant.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        // Should detect Family and Food/Eating
+        XCTAssertTrue(output.result.contains("Family") || output.result.contains("Food"))
+        XCTAssertTrue(output.metadata["ranked"]?.contains("Family") ?? false)
+        XCTAssertTrue(output.metadata["ranked"]?.contains("Food/Eating") ?? false)
+    }
+
+    func testDomainProAnalyzerHealthAndSleep() throws {
+        let analyzer = DomainProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "Couldn't sleep again. Doctor said my insomnia might be stress-related.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        // Should detect Sleep/Rest and Health/Medical
+        XCTAssertTrue(output.metadata["ranked"]?.contains("Sleep/Rest") ?? false)
+        XCTAssertTrue(output.metadata["ranked"]?.contains("Health/Medical") ?? false)
+    }
+
+    func testDomainProAnalyzerWithSelection() throws {
+        let fullText = "Worked all day. Later went to the gym and did a great workout."
+        let selectedStart = fullText.firstIndex(of: "L")!
+        let selectedEnd = fullText.endIndex
+        let range = selectedStart ..< selectedEnd
+        
+        let input = AnalyzerInput(
+            fullText: fullText,
+            selectedRange: range,
+            fallbackEmotion: nil
+        )
+
+        let output = try DomainProAnalyzer().analyze(input)
+        // Selected text focuses on gym/workout, should prioritize Exercise/Fitness
+        XCTAssertTrue(output.result.contains("Exercise") || output.result.contains("Fitness"))
+    }
+
+    func testDomainProAnalyzerEmptyText() throws {
+        let analyzer = DomainProAnalyzer()
+        let input = AnalyzerInput(
+            fullText: "",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        XCTAssertTrue(output.result.contains("General") || output.result.contains("Other"))
+    }
 }

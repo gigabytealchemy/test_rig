@@ -5,20 +5,23 @@ public struct DefaultAlgorithmRegistry: AlgorithmRegistry {
     public let analyzers: [Analyzer]
     public init() {
         analyzers = [
-            // Original analyzers
+            // Emotion analyzers
             RuleEmotionAnalyzer(),
-            DomainAnalyzer(),
-            ActiveListeningAnalyzer(),
-            TitleAnalyzer(),
-            PromptAnalyzer(),
-
-            // Emotion analyzer
             EmotionProAnalyzer(),
-
-            // New ALR analyzers
+            
+            // Domain analyzers
+            DomainAnalyzer(),
+            DomainProAnalyzer(),
+            
+            // ALR analyzers
+            ActiveListeningAnalyzer(),
             ALR_EngineWrap(),
             ALR_EngineWithPatternHint(),
             ALR_EnginePro(),
+            
+            // Other analyzers
+            TitleAnalyzer(),
+            PromptAnalyzer(),
         ]
     }
 }
