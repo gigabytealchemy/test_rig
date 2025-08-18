@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# Script to classify journal entries in CSV format using EmotionProAnalyzer and DomainProAnalyzer
+# Usage: ./Scripts/classify_csv
+
+# Change to the project directory
+cd "$(dirname "$0")/.." || exit 1
+
+# Check if the executable exists, if not build it
+if [ ! -f "Packages/ALRPackages/.build/debug/classify-csv" ]; then
+    echo "Building classify-csv executable..."
+    (cd Packages/ALRPackages && swift build) || exit 1
+fi
+
+# Run the classifier
+echo "Running CSV classifier..."
+Packages/ALRPackages/.build/debug/classify-csv
+
+echo "Done! Output saved to data/data_with_classifications.csv"

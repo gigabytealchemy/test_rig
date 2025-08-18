@@ -30,35 +30,36 @@ public final class RuleEmotionClassifierPro: @unchecked Sendable {
     public init() { loadExternalLexicon() }
 
     // MARK: - Tunables
-    private let clauseAfterContrastWeight: Double = 1.35 // emphasize the clause after BUT/HOWEVER/THOUGH
+    private let clauseAfterContrastWeight: Double = 1.10 // emphasize the clause after BUT/HOWEVER/THOUGH
     private let negationWindow: Int = 3                  // tokens before a hit that invert or dampen
     private let intensifierMul: Double = 1.6
     private let dampenerMul: Double = 0.7
     private let exclaimAmpPerBang: Double = 0.12         // add % per '!'
     private let capsBoost: Double = 0.15                 // if token is ALLCAPS and length>2
-    private let mixedMargin: Double = 0.22               // within 22% of top → Mixed
+    private let mixedMargin: Double = 0.35               // within 22% of top → Mixed
 
     // MARK: - Lexicons (extendable)
     // Use lowercased stems (e.g., "grateful", "gratitu" unnecessary). We also stem lightly below.
     private var joy: Set<String> = [
-        "proud","grateful","gratitude","relief","relieved","glad","joy","happy","happiness","excited","content","appreciate","win","progress","celebrate",
+        "proud","grateful","gratitude","relief","relieved","glad","joy","happy","happiness","excited","content","appreciate","win","progress","celebrate","satisfied","satisfaction",
+        "elated","ecstatic","overjoyed","thrilled","cheerful","cheer","uplifted","upbeat","optimistic","hopeful","positive","energized","energise","inspired","inspire","fulfilled",
         // Dialects/slang/UK/Aus/US
-        "stoked","buzzing","amped","pumped","over the moon","chuffed","well chuffed","proper chuffed","made up","delighted","thrilled","ecstatic","elated","overjoyed","cheered","lifted","heartened"
+        "stoked","buzzing","amped","pumped","over the moon","chuffed","well chuffed","proper chuffed","made up","delighted","thrilled","ecstatic","elated","overjoyed","cheered","lifted","heartened",
     ]
     private var sadness: Set<String> = [
-        "sad","sadness","regret","miss","missing","lonely","alone","loss","losing","grief","heartbroken","devastated","bereft","sorrow","mourn","mourning","blue","down","low","flat","drained","burnt out","burned out","exhausted","knackered","shattered","gutted","downcast","disappointed","let down"
+        "sad","sadness","regret","miss","missing","lonely","alone","loss","losing","grief","heartbroken","devastated","bereft","sorrow","mourn","mourning","blue","down","low","flat","drained","burnt out","burned out","exhausted","knackered","shattered","gutted","downcast","disappointed","let down", "disheartened","dispirited","demoralized","unhappy","unfulfilled","unmotivated","uninterested","unenthusiastic","unexcited","unmoved","unimpressed","down in the dumps","bored","boring","boredom","monotony","monotonous","tedious","tedium","dragged"
     ]
     private var anger: Set<String> = [
-        "angry","anger","furious","mad","irritated","annoyed","peeved","pissed off","cheesed off","miffed","rage","seething","fuming","livid","resent","resentful","unfair","injustice","betray","crossed a line","frustrat","wound up"
+        "angry","anger","furious","mad","irritated","annoyed","peeved","pissed off","cheesed off","miffed","rage","seething","fuming","livid","resent","resentful","unfair","injustice","betray","crossed a line","frustrat","wound up", "fed up","sick of","had enough","ticked off","riled up","worked up","boiling point","boiling over","blown up","blowing up","blow up","blasted","frustrated","frustrating","frustration"
     ]
     private var fear: Set<String> = [
-        "afraid","scared","fear","anxious","anxiety","worried","worry","nervous","on edge","jittery","overwhelm","overwhelmed","panic","panicked","terrified","petrified","dread","uneasy","apprehensive"
+        "afraid","scared","fear","anxious","anxiety","worried","worry","nervous","on edge","jittery","overwhelm","overwhelmed","panic","panicked","terrified","petrified","dread","uneasy","apprehensive", "apprehension","phobia","freaked out","freaking out","freak out","spooked","spooked out","shaken up","shook up","distressed","distress","distressing","distressed out","distress out", "paranoid","paranoia","creeped out","concern","concerned","worrying"
     ]
     private var surprise: Set<String> = [
-        "surprised","shocked","shock","sudden","unexpected","didn't expect","did not expect","out of nowhere","whoa","wow","gobsmacked","flabbergasted","stunned","took me by surprise"
+        "surprised","shocked","shock","sudden","unexpected","didn't expect","did not expect","out of nowhere","whoa","wow","gobsmacked","flabbergasted","stunned","took me by surprise", "taken aback","astonished","amazed","astounded","flummoxed","baffled","bewildered","dumbfounded","staggered","unbelievable","unforeseen","unanticipated"
     ]
     private var disgust: Set<String> = [
-        "disgust","disgusted","gross","nasty","repulsed","revolting","can't stand","cannot stand","yuck","eww","icky","vile","minging","manky","rank","foul","nauseous","sickening"
+        "disgust","disgusted","gross","nasty","repulsed","revolting","can't stand","cannot stand","yuck","eww","icky","vile","minging","manky","rank","foul","nauseous","sickening", "sickened","appalled","abhorrent","repellent","repugnant","loathsome","detestable","detest","loathe","revulsion","revulsed","turned off","turned off by"
     ]
     private var neutral: Set<String> = [
         "note","noticed","observing","log","track","journal","record","write","today","this morning","this evening","update","check-in","check in"
@@ -82,15 +83,21 @@ public final class RuleEmotionClassifierPro: @unchecked Sendable {
             // Surprise
             (rx(#"\b(?:didn'?t expect|out of nowhere|sudden(?:ly)?)\b"#), { $0[5, default:0] += 2.5 }),
             // Disgust
-            (rx(#"\b(?:disgust(?:ed|ing)?|gross|can't stand|cannot stand)\b"#), { $0[6, default:0] += 3 })
+            (rx(#"\b(?:disgust(?:ed|ing)?|gross|can't stand|cannot stand)\b"#), { $0[6, default:0] += 3 }),
+            // Frustration → Anger
+            (rx(#"(?<!not )\bfrustrat(?:ed|ing|ion)?\b"#), { $0[3, default:0] += 3.0 }),
+            // Concern → Fear
+            (rx(#"\bconcern(?:ed|ing)?\b"#), { $0[4, default:0] += 2.0 }),
+            // Satisfaction → Joy (low)
+            (rx(#"\bsatisf(?:ied|action)\b"#), { $0[1, default:0] += 1.2 }),
         ]
     }()
 
     private let intensifiers: Set<String> = [
-        "very","really","so","extremely","totally","incredibly","soooo","super","mega","proper","dead","well"
+        "very","really","so","extremely","totally","incredibly","soooo","super","mega","proper","dead","well", "absolutely","completely","thoroughly","utterly","highly","exceedingly","overly","excessively","intensely","intense","intensified","intensifying","intensifier","intensifiers","intensify"
     ]
     private let dampeners: Set<String>   = [
-        "a bit","kind of","kinda","slightly","somewhat","a little","sort of","ish","low-key","lowkey"
+        "a bit","kind of","kinda","slightly","somewhat","a little","sort of","ish","low-key","lowkey", "not really","not that","not too","not very","not much","not really that","not really very"
     ]
     private let negators: Set<String>     = [
         "not","never","no","hardly","barely","scarcely","isn't","isnt","aren't","arent","don't","dont","didn't","didnt","cannot","can't","cant","ain't","ain’t","won't","wont"
@@ -131,8 +138,17 @@ public final class RuleEmotionClassifierPro: @unchecked Sendable {
         let sorted = scores.sorted { $0.value > $1.value }
         let top = sorted.first!
         let second = sorted.dropFirst().first ?? (7,0)
-        let isMixed = second.1 > 0 && (top.1 - second.1) / max(1.0, top.1) < mixedMargin
+        
+        // Opposing-valence Mixed rule: Joy vs (Anger|Fear|Sadness) both present
+        let joyScore = scores[1] ?? 0
+        let negMax = max(scores[2] ?? 0, scores[3] ?? 0, scores[4] ?? 0)
+
+        let mixedOpposing = (joyScore > 0.8 && negMax > 0.8) &&
+                            ((abs(joyScore - negMax) / max(1.0, max(joyScore, negMax))) < 0.5)
+
+        let isMixed = mixedOpposing || (second.1 > 0 && (top.1 - second.1) / max(1.0, top.1) < mixedMargin)
         let id = isMixed ? 8 : top.0
+
         return Result(id: id, label: labelFor(id), scores: scores)
     }
 

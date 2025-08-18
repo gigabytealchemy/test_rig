@@ -61,85 +61,133 @@ public final class DomainClassifierPro: @unchecked Sendable {
     private var keywords: [String: Set<String>] = [:]
     private var regexPhrases: [(domain: String, rx: NSRegularExpression)] = []
 
-    // Seed lexicon (extend freely; overlay can add more)
+    // Extended starter set of keywords across domains
     private func seedKeywords() -> [String: [String]] {
         return [
             "Exercise/Fitness": [
-                "run","ran","jog","gym","workout","work out","exercise","lift","weights","squat","bench","deadlift","stretch","yoga","pilates","swim","bicycle","cycle","bike","steps","walk","hike","cardio","spin","class","coach","trainer","pb","personal best"
+                "run","ran","running","jog","jogging","gym","workout","work out","exercise","lift","lifting","weights",
+                "squat","bench","deadlift","stretch","yoga","pilates","swim","swimming","bicycle","cycling","bike",
+                "steps","walk","walking","hike","hiking","cardio","spin","spinning","class","coach","trainer",
+                "pb","personal best","aerobics","zumba","crossfit","rowing","elliptical","treadmill","fitness",
+                "training","athletic","sports","soccer","football","basketball","tennis","rugby","cricket"
             ],
             "Family": [
-                "mother","mom","mum","mama","mommy","father","dad","daddy","mum and dad","parents","parenting","sister","brother","siblings","daughter","son","kids","child","children","grandma","grandpa","grandparent","in-law","inlaws","cousin","aunt","uncle","niece","nephew","family"
+                "mother","mom","mum","mama","mommy","father","dad","daddy","parents","parenting","sister","brother",
+                "siblings","daughter","son","kids","child","children","grandma","grandpa","grandparent","in-law",
+                "inlaws","cousin","aunt","uncle","niece","nephew","family","relative","kin","folks","household",
+                "stepmom","stepdad","stepsister","stepbrother"
             ],
             "Friends": [
-                "friend","bestie","mate","pal","buddy","bros","hang out","hangout","catch up","caught up","girls night","guys night","brunch","pub","bar","party"
+                "friend","friends","bestie","mate","pal","buddy","bros","crew","squad","circle","gang","hang out",
+                "hangout","catch up","caught up","girls night","guys night","brunch","pub","bar","party","gathering"
             ],
             "Relationships/Marriage/Partnership": [
-                "partner","spouse","husband","wife","fiancé","fiance","fiancée","boyfriend","girlfriend","bf","gf","relationship","marriage","wed","wedding","anniversary","argued","argue","fight","fought","counseling","counselling","couples","date night","domestic"
+                "partner","spouse","husband","wife","fiancé","fiance","fiancée","boyfriend","girlfriend","bf","gf",
+                "relationship","marriage","wed","wedding","anniversary","argued","argue","fight","fought","counseling",
+                "counselling","couples","date night","domestic","commitment","union","bond","divorce","separation"
             ],
             "Love/Romance": [
-                "love","crush","romance","romantic","kiss","kissing","intimate","intimacy","sex","sexual","make out","made out","flirt","flirting","chemistry","spark"
+                "love","lover","crush","romance","romantic","kiss","kissing","intimate","intimacy","sex","sexual",
+                "make out","made out","flirt","flirting","chemistry","spark","passion","affection","beloved","desire"
             ],
             "Food/Eating": [
-                "eat","ate","eating","meal","breakfast","brunch","lunch","dinner","snack","snacked","bake","baked","cook","cooked","cooking","recipe","restaurant","cafe","café","takeout","take-away","delivery","diet","calorie","protein","carb","vegan","vegetarian","gluten-free","cupcake","cake","pizza"
+                "eat","ate","eating","meal","breakfast","brunch","lunch","dinner","snack","snacked","bake","baked",
+                "cook","cooked","cooking","recipe","restaurant","cafe","café","takeout","take-away","delivery",
+                "diet","calorie","protein","carb","vegan","vegetarian","gluten-free","cupcake","cake","pizza","pasta",
+                "burger","sandwich","supper","feast","buffet","sushi","doughnut","donut","ice cream","barbecue","bbq"
             ],
             "Sleep/Rest": [
-                "sleep","slept","sleeping","nap","napped","tired","exhausted","insomnia","rest","bedtime","woke","wake","awake","dream","dreamt","dreamed","nightmare","restless"
+                "sleep","slept","sleeping","nap","napped","tired","exhausted","insomnia","rest","bedtime","woke","wake",
+                "awake","dream","dreamt","dreamed","nightmare","restless","siesta","slumber","doze","snooze"
             ],
             "Health/Medical": [
-                "health","healthy","doctor","gp","clinic","hospital","er","a&e","urgent care","nurse","dentist","therapist","therapy","counselor","physio","physical therapy","pt","meds","medicine","rx","prescription","diagnos","symptom","bp","blood pressure","cholesterol","heart rate","injury","injured","surgery","sore","ache","pain","migraine","cold","flu"
+                "health","healthy","doctor","gp","clinic","hospital","er","a&e","urgent care","nurse","dentist","therapist",
+                "therapy","counselor","physio","physical therapy","pt","meds","medicine","rx","prescription","diagnos",
+                "symptom","bp","blood pressure","cholesterol","heart rate","injury","injured","surgery","sore","ache",
+                "pain","migraine","cold","flu","checkup","vaccination","vaccine","illness","disease","wellness","treatment"
             ],
             "Work/Career": [
-                "work","job","career","office","boss","manager","coworker","colleague","colleague","deadline","deliverable","meeting","meet","standup","stand-up","retro","review","promotion","promote","raise","pay rise","demote","hired","fired","layoff","furlough","overtime","wfh","remote","commute","project","launch","ship","ticket","jira","email"
+                "work","job","career","office","boss","manager","coworker","colleague","deadline","deliverable","meeting",
+                "standup","stand-up","retro","review","promotion","promote","raise","pay rise","demote","hired","fired",
+                "layoff","furlough","overtime","wfh","remote","commute","project","launch","ship","ticket","jira","email",
+                "slack","report","kpi","okr","okrs","org chart","reorg","pull request","merge","commit","shift","schedule",
+                "worked","working","assignment","task","submission","deliverable","progress",
+                "client","gig","freelance","remote","online work"
             ],
             "Money/Finances": [
-                "money","finance","finances","budget","budgeting","paycheck","salary","wage","wages","paid","unpaid","bonus","rent","mortgage","loan","debt","credit","credit card","bank","savings","invest","investment","investing","stocks","shares","bills","bill","tax","irs","hmrc","superannuation"
+                "money","finance","finances","budget","budgeting","paycheck","salary","wage","wages","paid","unpaid",
+                "bonus","rent","mortgage","loan","debt","credit","credit card","bank","savings","invest","investment",
+                "investing","stocks","shares","bills","bill","tax","irs","hmrc","superannuation","interest","dividend",
+                "pension","retirement","crypto","bitcoin","ethereum","direct deposit","late fee", "reward",
+                "earnings","income","profit","cash","bills","goal"
             ],
             "School/Learning": [
-                "school","class","classes","lecture","seminar","study","studying","homework","assignment","exam","quiz","midterm","final","project","teacher","prof","professor","tutor","grade","gpa","research","thesis","dissertation","paper","essay","campus"
+                "school","class","classes","lecture","seminar","study","studying","homework","assignment","exam","quiz",
+                "midterm","final","project","teacher","prof","professor","tutor","grade","gpa","research","thesis",
+                "dissertation","paper","essay","campus","course","lesson","learning","curriculum","group project"
             ],
             "Spirituality/Religion": [
-                "god","gods","faith","pray","prayer","church","mass","mosque","temple","synagogue","spiritual","spirituality","bible","quran","koran","torah","meditate","meditation","mindful","mindfulness","retreat","sunday service"
+                "god","gods","faith","pray","prayer","church","mass","mosque","temple","synagogue","spiritual",
+                "spirituality","bible","quran","koran","torah","meditate","meditation","mindful","mindfulness","retreat",
+                "sunday service","hymn","worship","belief","soul","spirit"
             ],
             "Recreation/Leisure": [
-                "movie","film","cinema","tv","series","show","netflix","hulu","disney+","disney plus","hbomax","max","prime","board game","boardgame","puzzle","craft","knit","knitting","garden","gardening","park","beach","pool","barbecue","bbq"
+                "movie","film","cinema","tv","series","show","netflix","hulu","disney+","disney plus","hbomax","max","prime",
+                "board game","boardgame","puzzle","craft","knit","knitting","garden","gardening","park","beach","pool",
+                "outing","festival","concert","gig","sports","stadium","match","team","league","game night","movie night"
             ],
             "Travel/Nature": [
-                "travel","trip","holiday","vacation","staycation","flight","airport","airplane","plane","train","road trip","roadtrip","drive","drove","bus","bike tour","camp","camping","hike","trail","forest","woods","mountain","lake","river","ocean","sea","nature","outdoors"
+                "travel","trip","holiday","vacation","staycation","flight","airport","airplane","plane","train","road trip",
+                "roadtrip","drive","drove","bus","bike tour","camp","camping","hike","trail","forest","woods","mountain",
+                "lake","river","ocean","sea","nature","outdoors","journey","itinerary","adventure","national park"
             ],
             "Creativity/Art": [
-                "create","creative","creativity","write","writing","wrote","draft","poem","poetry","novel","story","paint","painting","draw","drawing","sketch","design","compose","song","music","practice","rehearsal","studio","art","gallery","exhibit"
+                "create","creative","creativity","write","writing","wrote","draft","poem","poetry","novel","story","paint",
+                "painting","draw","drawing","sketch","design","compose","song","music","practice","rehearsal","studio",
+                "art","gallery","exhibit","photography","photo","film-making","craft","handmade","writer's block","first draft"
             ],
             "Community/Society/Politics": [
-                "community","neighborhood","neighbourhood","volunteer","volunteering","charity","fundraiser","election","vote","voted","politics","policy","protest","march","rally","civic","council","local news","news","headline","crime","safety","public"
+                "community","neighborhood","neighbourhood","volunteer","volunteering","charity","fundraiser","election",
+                "vote","voted","politics","policy","protest","march","rally","civic","council","local news","news",
+                "headline","crime","safety","public","government","parliament","senate","congress","food bank"
             ],
             "Technology/Media/Internet": [
-                "phone","screen","scroll","scrolled","scrolling","social","socials","social media","facebook","instagram","ig","tiktok","twitter","x.com","youtube","reddit","discord","slack","email","inbox","notifications","app","apps","game","gaming","console","pc","mac","iphone","android","laptop","online","offline"
+                "phone","screen","scroll","scrolled","scrolling","social","socials","social media","facebook","instagram","ig",
+                "tiktok","twitter","x.com","youtube","reddit","discord","slack","email","inbox","notifications","app","apps",
+                "game","gaming","console","pc","mac","iphone","android","laptop","online","offline","internet","web","digital",
+                "zoom","teams","facetime","doomscroll","doomscrolling","screen time","inbox zero"
             ],
             "Self/Growth/Habits": [
-                "goal","goals","habit","habits","streak","journal","journaling","therapy homework","self-care","self care","routine","morning routine","evening routine","reflection","reflect","intent","intentions","affirmation","vision","plan","planning","review","check-in","check in","track","tracked","on track","back on track"
+                "goal","goals","habit","habits","streak","journal","journaling","therapy homework","self-care","self care",
+                "routine","morning routine","evening routine","reflection","reflect","intent","intentions","affirmation",
+                "vision","plan","planning","review","check-in","check in","track","tracked","on track","back on track",
+                "resolution","challenge","growth","mindset","practice","personal development","self improvement"
             ]
         ]
     }
 
-    // Phrase regex seeds (heavier weight than keywords)
+    // Phrase regex seeds
     private func seedPhrases() -> [String: [String]] {
         return [
-            "Exercise/Fitness": [ #"\b(5k|10k|marathon|half marathon)\b"#, #"\bpersonal best\b"# ],
-            "Family": [ #"\b(first )?birthday\b"#, #"\bfamily (dinner|gathering|reunion)\b"# ],
-            "Relationships/Marriage/Partnership": [ #"\bdate night\b"#, #"\bmarriage counseling|couples therapy\b"# ],
-            "Food/Eating": [ #"\b(gluten[- ]free|dairy[- ]free|vegan|vegetarian)\b"#, #"\bhome[- ]cooked\b"# ],
-            "Work/Career": [ #"\bperformance review\b"#, #"\b(rfa|rfc|okr|offsite)\b"#, #"\bcode review\b"# ],
-            "Money/Finances": [ #"\bcredit card\b"#, #"\b(loan|mortgage) approval\b"# ],
-            "School/Learning": [ #"\bfinal exam\b"#, #"\bpeer review\b"# ],
-            "Spirituality/Religion": [ #"\bsunday service\b"#, #"\b(quiet )?time with god\b"# ],
-            "Recreation/Leisure": [ #"\bmovie night\b"#, #"\bgame night\b"# ],
-            "Travel/Nature": [ #"\broad (?:trip|trips)\b"#, #"\bnational park\b"# ],
-            "Creativity/Art": [ #"\bwriter'?s block\b"#, #"\bfirst draft\b"# ],
-            "Community/Society/Politics": [ #"\b(voted|vote|election day)\b"#, #"\bfood bank\b"# ],
-            "Technology/Media/Internet": [ #"\bdoomscroll(?:ing)?\b"#, #"\bscreen time\b"# ],
-            "Self/Growth/Habits": [ #"\b(back|getting) on track\b"#, #"\bmorning routine\b"# ]
+            "Exercise/Fitness": [ #"\\b(5k|10k|marathon|half marathon)\\b"#, #"\\bpersonal best\\b"# ],
+            "Family": [ #"\\b(first )?birthday\\b"#, #"\\bfamily (dinner|gathering|reunion)\\b"# ],
+            "Relationships/Marriage/Partnership": [ #"\\bdate night\\b"#, #"\\bmarriage counseling|couples therapy\\b"# ],
+            "Food/Eating": [ #"\\b(gluten[- ]free|dairy[- ]free|vegan|vegetarian)\\b"#, #"\\bhome[- ]cooked\\b"# ],
+            "Work/Career": [ #"\\bperformance review\\b"#, #"\\b(rfa|rfc|okr|offsite)\\b"#, #"\\bcode review\\b"#,
+                             #"\\b(work(ed)? online)\\b"#, #"\\b(an assignment.*rejected)\\b"#],
+            "Money/Finances": [ #"\\bcredit card\\b"#, #"\\b(loan|mortgage) approval\\b"#, #"\\bdirect deposit\\b"#,
+                                #"\\b(earnings goal)\\b"#, #"\\b(pay(ing)? bills)\\b"#, #"\\b(make money)\\b"# ],
+            "School/Learning": [ #"\\bfinal exam\\b"#, #"\\bpeer review\\b"#, #"\\bgroup project\\b"# ],
+            "Spirituality/Religion": [ #"\\bsunday service\\b"#, #"\\b(quiet )?time with god\\b"# ],
+            "Recreation/Leisure": [ #"\\bmovie night\\b"#, #"\\bgame night\\b"#, #"\\blive music\\b"# ],
+            "Travel/Nature": [ #"\\broad (?:trip|trips)\\b"#, #"\\bnational park\\b"# ],
+            "Creativity/Art": [ #"\\bwriter'?s block\\b"#, #"\\bfirst draft\\b"# ],
+            "Community/Society/Politics": [ #"\\b(voted|vote|election day)\\b"#, #"\\bfood bank\\b"# ],
+            "Technology/Media/Internet": [ #"\\bdoomscroll(?:ing)?\\b"#, #"\\bscreen time\\b"#, #"\\binbox zero\\b"# ],
+            "Self/Growth/Habits": [ #"\\b(back|getting) on track\\b"#, #"\\bmorning routine\\b"# ]
         ]
     }
+
 
     // MARK: - Build regex from seeds
     private func buildRegex() {
