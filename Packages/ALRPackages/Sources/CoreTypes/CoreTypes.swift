@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AlgorithmCategory: String, CaseIterable, Codable, Hashable, Sendable {
-    case emotion, alr, title, prompt, domains
+    case emotion, domains, alr, title, prompt
 }
 
 public struct DomainScore: Codable, Sendable {
