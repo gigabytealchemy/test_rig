@@ -10,6 +10,7 @@ struct SelectableTextEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.usesFindBar = true
         textView.delegate = context.coordinator
+        textView.string = text  // Set initial text
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true

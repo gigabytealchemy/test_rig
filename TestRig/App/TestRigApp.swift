@@ -19,8 +19,11 @@ struct TestRigApp: App {
             .toolbar {
                 Button("Open") {
                     FileOpenSave.presentOpen { loaded in
-                        coordinator.text = loaded
-                        coordinator.selectionRange = nil
+                        Task { @MainActor in
+                            coordinator.text = loaded
+                            coordinator.selectionRange = nil
+                            print("DEBUG: Loaded text with \(loaded.count) characters")
+                        }
                     }
                 }
 
