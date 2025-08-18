@@ -12,7 +12,8 @@ public struct AnalyzerInput: Sendable, Codable {
 
     public init(fullText: String,
                 selectedRange: Range<String.Index>? = nil,
-                fallbackEmotion: String? = nil) {
+                fallbackEmotion: String? = nil)
+    {
         self.fullText = fullText
         if let range = selectedRange {
             let startOffset = fullText.distance(from: fullText.startIndex, to: range.lowerBound)
@@ -51,7 +52,8 @@ public struct AnalyzerOutput: Sendable, Codable, Identifiable {
                 name: String,
                 result: String,
                 durationMS: Int = 0,
-                metadata: [String: String] = [:]) {
+                metadata: [String: String] = [:])
+    {
         id = UUID()
         self.category = category
         self.name = name

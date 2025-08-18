@@ -13,7 +13,7 @@ public struct PromptAnalyzer: Analyzer {
             "joy": "Write a gratitude note focusing on a highlight from today.",
             "sadness": "Gently explore what you needed today but didn't get.",
             "anger": "List the triggers and one boundary you can set next time.",
-            "neutral": "Pick one sentence to expand with sensory detail."
+            "neutral": "Pick one sentence to expand with sensory detail.",
         ]
         let prompt = bank[emotion, default: "Reflect on a small action you can take next."]
         return AnalyzerOutput(
