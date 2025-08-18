@@ -10,8 +10,7 @@ struct ResultsDashboard: View {
                 ForEach(AlgorithmCategory.allCases, id: \.self) { category in
                     if let items = coordinator.resultsByCategory[category], !items.isEmpty {
                         Section(header: Text(category.rawValue.capitalized)
-                            .font(.headline))
-                        {
+                            .font(.headline)) {
                             ForEach(items) { output in
                                 VStack(alignment: .leading, spacing: 6) {
                                     HStack {

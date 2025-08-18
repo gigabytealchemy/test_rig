@@ -17,6 +17,17 @@ struct TestRigApp: App {
                     .frame(minWidth: 350)
             }
             .toolbar {
+                Button("Open") {
+                    FileOpenSave.presentOpen { loaded in
+                        coordinator.text = loaded
+                        coordinator.selectionRange = nil
+                    }
+                }
+
+                Button("Save") {
+                    FileOpenSave.presentSave(text: coordinator.text)
+                }
+
                 Button("Run All") {
                     coordinator.runAll()
                 }
