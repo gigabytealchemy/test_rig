@@ -18,3 +18,9 @@
 
 ## Coverage
 - `Scripts/coverage_guard.sh`
+
+## Logging & Timeouts
+- The Coordinator logs run start/end and per-analyzer durations via `os.Logger` (subsystem `com.yourorg.testrig`, category `rig.run`).
+- Per-analyzer timeout default is 3s; configurable via `runAll(timeoutPerAnalyzer:)`.
+- Analyzer errors appear inline as `❌` rows; timeouts as `⏱️ Timed out`.
+- A top-of-window banner (`lastError`) is available for rig-level issues (e.g., file I/O), currently not triggered by analyzers.

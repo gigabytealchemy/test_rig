@@ -4,7 +4,7 @@ set -euo pipefail
 SCHEME="TestRig"
 DESTINATION="platform=macOS,arch=arm64"
 RESULT_BUNDLE="build/TestResults.xcresult"
-MIN_COVERAGE=5  # % threshold for Step 1; will be raised in later steps
+MIN_COVERAGE=20  # raise threshold for final initial rig
 
 echo "Starting coverage guard..."
 echo "Cleaning build directory..."
