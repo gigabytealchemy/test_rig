@@ -1,7 +1,17 @@
 import Foundation
 
 public enum AlgorithmCategory: String, CaseIterable, Codable, Hashable, Sendable {
-    case emotion, alr, title, prompt
+    case emotion, alr, title, prompt, domains
+}
+
+public struct DomainScore: Codable, Sendable {
+    public let name: String
+    public let score: Double
+
+    public init(name: String, score: Double) {
+        self.name = name
+        self.score = score
+    }
 }
 
 public struct AnalyzerInput: Sendable, Codable {
@@ -9,10 +19,12 @@ public struct AnalyzerInput: Sendable, Codable {
     public let selectedRangeStart: Int?
     public let selectedRangeEnd: Int?
     public let fallbackEmotion: String?
+    public let domains: [DomainScore]?
 
     public init(fullText: String,
                 selectedRange: Range<String.Index>? = nil,
-                fallbackEmotion: String? = nil)
+                fallbackEmotion: String? = nil,
+                domains: [(name: String, score: Double)]? = nil)
     {
         self.fullText = fullText
         if let range = selectedRange {
@@ -25,6 +37,7 @@ public struct AnalyzerInput: Sendable, Codable {
             selectedRangeEnd = nil
         }
         self.fallbackEmotion = fallbackEmotion
+        self.domains = domains?.map { DomainScore(name: $0.name, score: $0.score) }
     }
 
     public var selectedRange: Range<String.Index>? {
@@ -37,6 +50,10 @@ public struct AnalyzerInput: Sendable, Codable {
     public var selectedText: String {
         guard let r = selectedRange else { return fullText }
         return String(fullText[r])
+    }
+
+    public var domainTuples: [(name: String, score: Double)]? {
+        domains?.map { ($0.name, $0.score) }
     }
 }
 

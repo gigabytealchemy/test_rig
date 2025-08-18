@@ -24,3 +24,9 @@
 - Per-analyzer timeout default is 3s; configurable via `runAll(timeoutPerAnalyzer:)`.
 - Analyzer errors appear inline as `❌` rows; timeouts as `⏱️ Timed out`.
 - A top-of-window banner (`lastError`) is available for rig-level issues (e.g., file I/O), currently not triggered by analyzers.
+
+## Domains
+- New category of analysis alongside Emotion, ALR, Title, Prompt.
+- DomainAnalyzer classifies text into categories (Work, Relationships, School, Family, Health, Money, etc.).
+- ActiveListeningAnalyzer and PromptAnalyzer now consume `input.domains` to produce domain-aware outputs.
+- Domains + emotions combined → more attuned responses and prompts.

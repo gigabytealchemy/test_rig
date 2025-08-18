@@ -7,6 +7,7 @@ public struct DefaultAlgorithmRegistry: AlgorithmRegistry {
         analyzers = [
             // Original analyzers
             RuleEmotionAnalyzer(),
+            DomainAnalyzer(),
             ActiveListeningAnalyzer(),
             TitleAnalyzer(),
             PromptAnalyzer(),

@@ -11,7 +11,11 @@ public struct ActiveListeningAnalyzer: Analyzer {
     }
 
     public func analyze(_ input: AnalyzerInput) throws -> AnalyzerOutput {
-        let reply = engine.respond(to: input.selectedText, fallbackEmotion: input.fallbackEmotion)
+        let reply = engine.respond(
+            to: input.selectedText,
+            fallbackEmotion: input.fallbackEmotion,
+            domains: input.domainTuples
+        )
         return AnalyzerOutput(
             category: .alr,
             name: name,

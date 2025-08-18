@@ -34,6 +34,36 @@ final class AnalyzersTests: XCTestCase {
 
     func testDefaultRegistryContainsAnalyzers() {
         let reg = DefaultAlgorithmRegistry()
-        XCTAssertEqual(reg.analyzers.count, 10) // 4 original + 6 new analyzers
+        XCTAssertEqual(reg.analyzers.count, 11) // 5 original + 6 new analyzers (added DomainAnalyzer)
+    }
+
+    func testDomainAnalyzerDetectsWork() throws {
+        let input = AnalyzerInput(fullText: "I had a tough day at work with my boss.")
+        let out = try DomainAnalyzer().analyze(input)
+        XCTAssertTrue(out.result.contains("Work"))
+    }
+
+    func testActiveListenerUsesDomain() throws {
+        let input = AnalyzerInput(
+            fullText: "Boss was harsh today.",
+            fallbackEmotion: "anger",
+            domains: [("Work", 0.9)]
+        )
+        let out = try ActiveListeningAnalyzer().analyze(input)
+        // Should contain work-related response
+        XCTAssertFalse(out.result.isEmpty)
+    }
+
+    func testPromptAnalyzerUsesDomainAndEmotion() throws {
+        let input = AnalyzerInput(
+            fullText: "Boss was kind today.",
+            fallbackEmotion: "joy",
+            domains: [("Work", 0.9)]
+        )
+        let out = try PromptAnalyzer().analyze(input)
+        // Should provide work+joy specific prompt
+        XCTAssertTrue(out.result.lowercased().contains("work") || out.result.contains("win"))
+        XCTAssertEqual(out.metadata["domain"], "Work")
+        XCTAssertEqual(out.metadata["promptType"], "combined")
     }
 }
