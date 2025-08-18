@@ -13,7 +13,9 @@ public struct ALR_EngineWithPatternHint: Analyzer {
             ? String(input.fullText[input.selectedRange!])
             : input.fullText
 
-        let emotionID = EmotionRegexV2().quickID(text)
+        let clf = RuleEmotionClassifierPro()
+        let emotionResult = clf.classify(text)
+        let emotionID = emotionResult.id
         let emotionString = emotionStringFor(emotionID)
         let main = engine.respond(to: text, fallbackEmotion: emotionString)
 

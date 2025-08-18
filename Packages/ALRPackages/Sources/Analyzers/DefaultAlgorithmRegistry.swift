@@ -12,10 +12,7 @@ public struct DefaultAlgorithmRegistry: AlgorithmRegistry {
             TitleAnalyzer(),
             PromptAnalyzer(),
 
-            // New emotion analyzers
-            EmotionRegexV1(),
-            EmotionRegexV2(),
-            EmotionTFIDFSeeded(),
+            // Emotion analyzer
             EmotionProAnalyzer(),
 
             // New ALR analyzers

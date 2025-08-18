@@ -24,9 +24,10 @@ public struct ALR_EngineWrap: Analyzer {
     }
 
     private func inferEmotionString(_ text: String) -> String {
-        // Use the V2 analyzer's emotion detection
-        let emotionID = EmotionRegexV2().quickID(text)
-        return emotionStringFor(emotionID)
+        // Use the EmotionProAnalyzer's emotion detection
+        let clf = RuleEmotionClassifierPro()
+        let result = clf.classify(text)
+        return emotionStringFor(result.id)
     }
 
     private func emotionStringFor(_ id: Int) -> String {

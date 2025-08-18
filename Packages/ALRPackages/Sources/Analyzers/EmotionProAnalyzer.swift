@@ -1,4 +1,4 @@
-// EmotionProAnalyzer.swift
+// RuleEmotionClassifierPro.swift
 //
 // Production-lean, privacy-first rule-based emotion classifier for journaling.
 // - Deterministic, fast, no network, no telemetry

@@ -34,7 +34,7 @@ final class AnalyzersTests: XCTestCase {
 
     func testDefaultRegistryContainsAnalyzers() {
         let reg = DefaultAlgorithmRegistry()
-        XCTAssertEqual(reg.analyzers.count, 12) // 5 original + 7 new analyzers (added DomainAnalyzer and EmotionProAnalyzer)
+        XCTAssertEqual(reg.analyzers.count, 9) // 5 original + EmotionProAnalyzer + 3 ALR analyzers
     }
 
     func testDomainAnalyzerDetectsWork() throws {
