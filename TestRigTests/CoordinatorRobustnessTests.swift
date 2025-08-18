@@ -8,9 +8,9 @@ final class CoordinatorRobustnessTests: XCTestCase {
         let category: AlgorithmCategory
         let name: String
         let result: String
-        
+
         func analyze(_ input: AnalyzerInput) throws -> AnalyzerOutput {
-            return AnalyzerOutput(category: category, name: name, result: result)
+            AnalyzerOutput(category: category, name: name, result: result)
         }
     }
 
@@ -33,10 +33,10 @@ final class CoordinatorRobustnessTests: XCTestCase {
         let coord = Coordinator(registry: reg)
         coord.text = "hello"
         coord.runAll(timeoutPerAnalyzer: .seconds(2))
-        
+
         // Wait briefly for the error to be processed
         try? await Task.sleep(for: .milliseconds(100))
-        
+
         let result = coord.resultsByCategory[.title]?.first?.result ?? ""
         XCTAssertTrue(result.hasPrefix("❌"), "Expected ❌ prefix on error")
         XCTAssertTrue(result.contains("boom"), "Expected error message in result")
@@ -53,40 +53,40 @@ final class CoordinatorRobustnessTests: XCTestCase {
         let coord = Coordinator(registry: reg)
         coord.text = "hello"
         coord.runAll(timeoutPerAnalyzer: .seconds(1))
-        
+
         // Wait for analyzers to complete
         try? await Task.sleep(for: .milliseconds(100))
-        
+
         // Verify grouping works correctly
         XCTAssertNotNil(coord.resultsByCategory[.emotion], "Expected emotion category results")
         XCTAssertNotNil(coord.resultsByCategory[.title], "Expected title category results")
-        
+
         // Verify multiple results per category
         let emotionResults = coord.resultsByCategory[.emotion] ?? []
         XCTAssertEqual(emotionResults.count, 2, "Expected 2 emotion analyzers")
-        
+
         let titleResults = coord.resultsByCategory[.title] ?? []
         XCTAssertEqual(titleResults.count, 2, "Expected 2 title analyzers (1 success, 1 error)")
-        
+
         // Verify error analyzer shows error
         let hasError = titleResults.contains { $0.result.hasPrefix("❌") }
         XCTAssertTrue(hasError, "Expected at least one error result in title category")
     }
-    
+
     @MainActor
     func testLoggingOccurs() async {
         // This test verifies that logging methods are called (no assertions, just coverage)
         let reg = StubRegistry(analyzers: [
-            FastAnalyzer(category: .emotion, name: "Logger", result: "log-test")
+            FastAnalyzer(category: .emotion, name: "Logger", result: "log-test"),
         ])
         let coord = Coordinator(registry: reg)
         coord.text = "test"
-        
+
         // Run and cancel to test both log paths
         coord.runAll()
         try? await Task.sleep(for: .milliseconds(50))
         coord.cancel()
-        
+
         // No assertions needed - just verifying code paths for coverage
     }
 }

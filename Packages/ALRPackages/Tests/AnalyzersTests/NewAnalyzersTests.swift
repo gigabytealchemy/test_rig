@@ -166,4 +166,36 @@ final class NewAnalyzersTests: XCTestCase {
         XCTAssertFalse(tfidf.result.isEmpty)
         XCTAssertTrue(tfidf.result.contains("–")) // Check it has the ID format
     }
+
+    // Test ALR_EnginePro
+    func testALREnginePro() throws {
+        let analyzer = ALR_EnginePro()
+        let input = AnalyzerInput(
+            fullText: "I've been stressed about work deadlines and my manager keeps adding more projects.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        XCTAssertEqual(output.category, .alr)
+        XCTAssertEqual(output.name, "ALR • Engine Pro (domain-aware)")
+        XCTAssertFalse(output.result.isEmpty)
+        XCTAssertNotNil(output.metadata["emotionID"])
+        XCTAssertNotNil(output.metadata["topDomain"])
+        // Should detect Work domain
+        XCTAssertTrue(output.metadata["topDomain"]?.contains("Work") ?? false)
+    }
+
+    func testALREngineProWithFamilyDomain() throws {
+        let analyzer = ALR_EnginePro()
+        let input = AnalyzerInput(
+            fullText: "My mother called yesterday. We talked about my sister's wedding plans.",
+            selectedRange: nil,
+            fallbackEmotion: nil
+        )
+
+        let output = try analyzer.analyze(input)
+        // Should detect Family domain
+        XCTAssertTrue(output.metadata["domains"]?.contains("Family") ?? false)
+    }
 }

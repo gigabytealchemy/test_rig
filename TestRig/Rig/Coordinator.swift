@@ -21,7 +21,8 @@ final class Coordinator: ObservableObject {
     }
 
     func runAll(fallbackEmotion: String? = nil,
-                timeoutPerAnalyzer: Duration = .seconds(3)) {
+                timeoutPerAnalyzer: Duration = .seconds(3))
+    {
         runTask?.cancel()
         isRunning = true
         lastError = nil
@@ -106,7 +107,8 @@ enum TimeoutError: Error { case timedOut }
 
 private extension Coordinator {
     func runWithTimeout<T>(_ duration: Duration,
-                           operation: @escaping () throws -> T) async throws -> T {
+                           operation: @escaping () throws -> T) async throws -> T
+    {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask { try operation() }
             group.addTask {

@@ -34,6 +34,6 @@ final class AnalyzersTests: XCTestCase {
 
     func testDefaultRegistryContainsAnalyzers() {
         let reg = DefaultAlgorithmRegistry()
-        XCTAssertEqual(reg.analyzers.count, 9) // 4 original + 5 new analyzers
+        XCTAssertEqual(reg.analyzers.count, 10) // 4 original + 6 new analyzers
     }
 }

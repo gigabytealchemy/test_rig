@@ -32,7 +32,7 @@ public struct EmotionTFIDFSeeded: Analyzer {
         "Fear": ["afraid": 1, "worry": 1, "anxious": 1, "scared": 1, "overwhelm": 1],
         "Surprise": ["unexpected": 1, "sudden": 1, "shock": 1, "didn't": 1, "out_of_nowhere": 1],
         "Disgust": ["gross": 1, "disgust": 1, "repulsed": 1, "can't_stand": 1],
-        "Neutral": ["note": 1, "observe": 1, "log": 1, "track": 1]
+        "Neutral": ["note": 1, "observe": 1, "log": 1, "track": 1],
     ]
 
     private func termFreq(_ text: String) -> [String: Double] {

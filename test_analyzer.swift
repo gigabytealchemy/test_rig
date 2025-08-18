@@ -4,7 +4,7 @@ import CoreTypes
 let fullText = "The beginning is neutral. I'm really afraid of what's next."
 let selectedStart = fullText.firstIndex(of: "I")!
 let selectedEnd = fullText.endIndex
-let range = selectedStart..<selectedEnd
+let range = selectedStart ..< selectedEnd
 
 let input = AnalyzerInput(
     fullText: fullText,

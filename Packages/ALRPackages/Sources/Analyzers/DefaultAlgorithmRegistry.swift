@@ -19,6 +19,7 @@ public struct DefaultAlgorithmRegistry: AlgorithmRegistry {
             // New ALR analyzers
             ALR_EngineWrap(),
             ALR_EngineWithPatternHint(),
+            ALR_EnginePro(),
         ]
     }
 }
