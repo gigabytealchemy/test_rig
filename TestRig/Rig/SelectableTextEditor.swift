@@ -20,7 +20,9 @@ struct SelectableTextEditor: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         if let tv = scroll.documentView as? NSTextView {
             if tv.string != text {
+                context.coordinator.isUpdating = true
                 tv.string = text
+                context.coordinator.isUpdating = false
             }
         }
     }
@@ -31,9 +33,12 @@ struct SelectableTextEditor: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: SelectableTextEditor
+        var isUpdating = false
+        
         init(_ parent: SelectableTextEditor) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
+            guard !isUpdating else { return }
             guard let tv = notification.object as? NSTextView else { return }
             parent.text = tv.string
         }
