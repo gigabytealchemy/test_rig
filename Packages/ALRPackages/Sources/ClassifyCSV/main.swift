@@ -68,6 +68,7 @@ func processCSV() {
     // Create analyzers
     let emotionAnalyzer = EmotionProAnalyzer()
     let domainAnalyzer = DomainProAnalyzer()
+    let alrProAnalyzer = ALR_EnginePro()
     
     var outputLines: [String] = []
     
@@ -76,6 +77,7 @@ func processCSV() {
     var newHeaderFields = headerFields
     newHeaderFields.append("EmotionPro")
     newHeaderFields.append("DomainPro")
+    newHeaderFields.append("ALR_EnginePro")
     outputLines.append(fieldsToCSVLine(newHeaderFields))
     
     // Process data rows
@@ -98,6 +100,7 @@ func processCSV() {
         
         var emotionResult = "Error"
         var domainResult = "Error"
+        var alrProResult = "Error"
         
         do {
             let emotionOutput = try emotionAnalyzer.analyze(input)
@@ -113,10 +116,18 @@ func processCSV() {
             print("Warning: Error analyzing domain for row \(i): \(error)")
         }
         
+        do {
+            let alrProOutput = try alrProAnalyzer.analyze(input)
+            alrProResult = alrProOutput.result
+        } catch {
+            print("Warning: Error analyzing ALR Pro for row \(i): \(error)")
+        }
+        
         // Create output row
         var newFields = fields
         newFields.append(emotionResult)
         newFields.append(domainResult)
+        newFields.append(alrProResult)
         outputLines.append(fieldsToCSVLine(newFields))
         
         // Progress indicator

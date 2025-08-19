@@ -154,10 +154,12 @@ public final class ActiveListenerEnginePro {
         var out = template
         let ns = sentence as NSString
         let captureCount = match.numberOfRanges - 1 // First range is the whole match
-        for i in 1 ... min(9, captureCount) {
-            let range = match.range(at: i)
-            if range.location != NSNotFound {
-                out = out.replacingOccurrences(of: "$\(i)", with: ns.substring(with: range))
+        if captureCount > 0 {
+            for i in 1 ... min(9, captureCount) {
+                let range = match.range(at: i)
+                if range.location != NSNotFound {
+                    out = out.replacingOccurrences(of: "$\(i)", with: ns.substring(with: range))
+                }
             }
         }
         return out

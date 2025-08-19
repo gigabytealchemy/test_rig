@@ -4,28 +4,27 @@
 // Deterministic, fast, no network. No ML.
 //
 // -----------------------------------------------------------------------------
-// This iteration — TWO SAFE, HIGH‑CONFIDENCE OVERRIDES
+// This iteration — Regex fix for “work out” variants + kin→Family bias (safe)
 // -----------------------------------------------------------------------------
 // What changed (and why)
-// 1) HARD OVERRIDE: “work out / workout / working out / worked out” → Exercise/Fitness
-//    • If this pattern appears anywhere, Exercise/Fitness is forced to win for that clause.
-//    • Additionally, Work/Career is zeroed for that clause to prevent bleed from “work”.
-//    • Rationale: in journaling, “work out” is unambiguous exercise; “work” is generic.
-// 2) STRONG FAMILY BIAS ON KIN TERMS
-//    • Presence of any kin term (kid(s), mom, dad, daughter, son, parents, etc.) applies
-//      a strong Family boost so Family wins even if Food/Love/School tokens appear.
+// 1) HARD OVERRIDE for Exercise when journaling mentions “work out / worked out /
+//    working out / workout / work‑outs / work outs”.
+//    • Updated regex to cover ALL common variants:
+//        \bwork(?:ed|ing)?\s?-?out(s)?\b | \bworkout(s)?\b
+//      (This fixes misses like “worked out”, “work outs”, etc.)
+//    • When matched in any sentence, we:
+///       - Strongly boost Exercise/Fitness for that sentence, and
+///       - Zero Work/Career for that sentence (prevents bleed from “work”).
+//
+// 2) STRONG FAMILY BIAS on kin terms (safe):
+//    • Any kin term (kids, mom, dad, daughter, son, parents, etc.) applies a strong
+//      Family boost so Family wins even if Food/Love/School words appear.
 //    • Exception: spouse‑only mentions (wife/husband/partner) with NO other kin do NOT
 //      trigger this bias (so pure couple entries can remain Relationships).
 //
-// Kept intentionally minimal to avoid over‑fitting. No logging; adapter unchanged.
-//
-// Tunables touched
-// • workoutForceWeight: +∞ effect via zeroing Work and a large Exercise add
-// • kinFamilyBoost: strong add so Family wins “almost regardless” (except spouse‑only)
-//
-// Next ideas (only if needed)
-// • If Family still leaks to Food, we can very slightly raise kinFamilyBoost.
-// • If an edge case appears where “work out” fires incorrectly, we can scope by tokenization.
+// Notes
+// • Minimal, generalizable rules; avoids over‑fitting.
+// • Analyzer adapter unchanged; determinism preserved.
 // -----------------------------------------------------------------------------
 
 import CoreTypes
@@ -35,7 +34,10 @@ public final class DomainClassifierPro: @unchecked Sendable {
     public struct Result: Sendable {
         public let ranked: [(name: String, score: Double)] // sorted desc
         public var primary: String { ranked.first?.name ?? "General / Other" }
-        public var scores: [String: Double] { Dictionary(uniqueKeysWithValues: ranked) }
+        public var scores: [String: Double] {
+            // Be explicit to avoid generic parsing ambiguity in Swift
+            return Dictionary(uniqueKeysWithValues: ranked.map { ($0.name, $0.score) })
+        }
     }
 
     public init() { buildRegex(); loadExternalLexicon() }
@@ -68,16 +70,17 @@ public final class DomainClassifierPro: @unchecked Sendable {
     private let lastSentenceBonus: Double = 1.15
     private let minReportScore: Double = 0.5  // below this, domains drop from ranked output
 
-    // Context windows
+    // Context window for kin proximity (kept for potential future use)
     private let familyKinWindow: Int = 8
 
-    // --- New override strengths ---
+    // --- Override strengths (safe, simple) ---
     private let kinFamilyBoost: Double = 3.0         // strong Family bias when any kin present (except spouse‑only)
-    private let workoutForceAdd: Double = 3.0        // extra add to Exercise when “work out” is found
-    private let workoutZeroOutWork: Bool = true      // zero Work when “work out” is found in a clause
+    private let workoutForceAdd: Double = 3.0        // extra add to Exercise when “work out” variants are found
+    private let workoutZeroOutWork: Bool = true      // zero Work when “work out” is found in a sentence
 
-    // Regex strings
-    private let workoutRegex = #"(?<!home)\bwork[ -]?out(s|ed|ing)?\b"#  // “work out / workout / worked/working out”
+    // Regex: cover ALL common “work out” variants
+    //  - work out, work-out, work outs, worked out, working out, workout, workouts
+    private let workoutRegex = #"\bwork(?:ed|ing)?\s?-?out(s)?\b|\bworkout(s)?\b"#
 
     // MARK: - Lexicons
     private var keywords: [String: Set<String>] = [:]
@@ -196,7 +199,7 @@ public final class DomainClassifierPro: @unchecked Sendable {
         ]
     }
 
-    // Phrase regex seeds (kept minimal; the “work out” hard override is handled separately too)
+    // Phrase regex seeds (kept minimal; “work out” hard override is also applied explicitly)
     private func seedPhrases() -> [String: [String]] {
         return [
             "Exercise/Fitness": [
@@ -218,7 +221,7 @@ public final class DomainClassifierPro: @unchecked Sendable {
                 #"\b(gluten[- ]free|dairy[- ]free|vegan|vegetarian)\b"#,
                 #"\bhome[- ]cooked\b"#
             ]
-            // Other domains keep their default minimal seeds above (not repeated here for brevity)
+            // Other domains retain their default signals via keywords
         ]
     }
 
@@ -260,7 +263,7 @@ public final class DomainClassifierPro: @unchecked Sendable {
                 if c > 0 { sliceScores[dom, default:0] += Double(c) * keywordHit }
             }
 
-            // --- HARD OVERRIDES (per your request) ---
+            // --- HARD OVERRIDES (safe, minimal) ---
             applyWorkoutHardOverride(raw: sentence, scores: &sliceScores)
             applyKinStrongFamilyBias(tokens: toks, scores: &sliceScores)
 
@@ -273,19 +276,18 @@ public final class DomainClassifierPro: @unchecked Sendable {
 
         // Rank and threshold
         let sortedScores = scores.sorted { $0.value > $1.value }.filter { $0.value >= minReportScore }
-        let ranked = sortedScores.map { (name: $0.key, score: ($0.value * 100).rounded() / 100) }
+        let ranked = sortedScores.map { (name: $0.key, score: ( ($0.value * 100).rounded() / 100 )) }
         return Result(ranked: ranked)
     }
 
     // MARK: - Overrides
 
-    // 1) “work out / workout / working/ed out” ⇒ Force Exercise; optionally zero Work.
+    // 1) “work out / worked out / working out / workout(s) / work outs” ⇒ Force Exercise; optionally zero Work.
     private func applyWorkoutHardOverride(raw: String, scores: inout [String: Double]) {
         if regexMatch(workoutRegex, in: raw) {
-            // Strongly bias Exercise
             scores["Exercise/Fitness", default: 0] += phraseHit + workoutForceAdd
             if workoutZeroOutWork {
-                scores["Work/Career"] = 0 // ensure Work cannot dominate this clause
+                scores["Work/Career"] = 0 // ensure Work cannot dominate this sentence
             }
         }
     }
@@ -350,7 +352,7 @@ public final class DomainClassifierPro: @unchecked Sendable {
     }
 
     private func tokenize(_ s: String) -> [String] {
-        // Collapse common multiword tokens to single tokens so lexicons/regex align better.
+        // Collapse common multiword tokens so lexicons/regex align better.
         let joined = s
             .replacingOccurrences(of: "credit card", with: "credit_card")
             .replacingOccurrences(of: "out of nowhere", with: "out_of_nowhere")
@@ -362,8 +364,8 @@ public final class DomainClassifierPro: @unchecked Sendable {
             .replacingOccurrences(of: "movie night", with: "movie_night")
             .replacingOccurrences(of: "road trip", with: "roadtrip")
             .replacingOccurrences(of: "board game", with: "boardgame")
-            .replacingOccurrences(of: "work out", with: "workout") // help disambiguate “work out”
-        return joined.split{ !$0.isLetter && !$0.isNumber && $0 != "_" && $0 != "-" }.map(String.init)
+            .replacingOccurrences(of: "work out", with: "workout") // helps lexicon hits too
+        return joined.split { !$0.isLetter && !$0.isNumber && $0 != "_" && $0 != "-" }.map(String.init)
     }
 
     private func inLex(_ token: String, _ set: Set<String>) -> Bool {
