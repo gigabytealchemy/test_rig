@@ -30,24 +30,25 @@ public final class RuleEmotionClassifierPro: @unchecked Sendable {
     public init() { loadExternalLexicon() }
 
     // MARK: - Tunables
-    private let clauseAfterContrastWeight: Double = 1.10 // emphasize the clause after BUT/HOWEVER/THOUGH
+    private let clauseAfterContrastWeight: Double = 1.20 // emphasize the clause after BUT/HOWEVER/THOUGH
     private let negationWindow: Int = 3                  // tokens before a hit that invert or dampen
     private let intensifierMul: Double = 1.6
     private let dampenerMul: Double = 0.7
     private let exclaimAmpPerBang: Double = 0.12         // add % per '!'
     private let capsBoost: Double = 0.15                 // if token is ALLCAPS and length>2
-    private let mixedMargin: Double = 0.35               // within 22% of top → Mixed
-
+    private let mixedMargin: Double = 0.28               // within 22% of top → Mixed
+/**
     // MARK: - Lexicons (extendable)
     // Use lowercased stems (e.g., "grateful", "gratitu" unnecessary). We also stem lightly below.
     private var joy: Set<String> = [
-        "proud","grateful","gratitude","relief","relieved","glad","joy","happy","happiness","excited","content","appreciate","win","progress","celebrate","satisfied","satisfaction",
+        "proud","grateful","gratitude","relief","relieved","glad","joy","happy","happiness","excited","content","appreciate","win","celebrate","satisfied","satisfaction",
         "elated","ecstatic","overjoyed","thrilled","cheerful","cheer","uplifted","upbeat","optimistic","hopeful","positive","energized","energise","inspired","inspire","fulfilled",
         // Dialects/slang/UK/Aus/US
         "stoked","buzzing","amped","pumped","over the moon","chuffed","well chuffed","proper chuffed","made up","delighted","thrilled","ecstatic","elated","overjoyed","cheered","lifted","heartened",
     ]
+    
     private var sadness: Set<String> = [
-        "sad","sadness","regret","miss","missing","lonely","alone","loss","losing","grief","heartbroken","devastated","bereft","sorrow","mourn","mourning","blue","down","low","flat","drained","burnt out","burned out","exhausted","knackered","shattered","gutted","downcast","disappointed","let down", "disheartened","dispirited","demoralized","unhappy","unfulfilled","unmotivated","uninterested","unenthusiastic","unexcited","unmoved","unimpressed","down in the dumps","bored","boring","boredom","monotony","monotonous","tedious","tedium","dragged"
+        "sad","sadness","regret","miss","missing","lonely","alone","loss","losing","grief","heartbroken","devastated","bereft","sorrow","mourn","mourning","blue","down","low","flat","drained","burnt out","burned out","exhausted","knackered","shattered","gutted","downcast","disappointed","let down", "disheartened","dispirited","demoralized","unhappy","unfulfilled","unmotivated","uninterested","unenthusiastic","unexcited","unmoved","unimpressed","down in the dumps","bored","boring","boredom","monotony","monotonous","tedious","tedium","dragged", "nostalgic","nostalgia","homesick","homesickness"
     ]
     private var anger: Set<String> = [
         "angry","anger","furious","mad","irritated","annoyed","peeved","pissed off","cheesed off","miffed","rage","seething","fuming","livid","resent","resentful","unfair","injustice","betray","crossed a line","frustrat","wound up", "fed up","sick of","had enough","ticked off","riled up","worked up","boiling point","boiling over","blown up","blowing up","blow up","blasted","frustrated","frustrating","frustration"
@@ -64,32 +65,86 @@ public final class RuleEmotionClassifierPro: @unchecked Sendable {
     private var neutral: Set<String> = [
         "note","noticed","observing","log","track","journal","record","write","today","this morning","this evening","update","check-in","check in"
     ]
+*/
+    
+    // Use lowercase; lightStem() will also catch ing/ed/ly/ies/s
+    private var joy: Set<String> = [
+      "proud","grateful","gratitude","relief","relieved","glad","joy","happy","happiness",
+      "excited","content","appreciate","overjoyed","thrilled","delighted","stoked","buzzing",
+      "chuffed","ecstatic","elated","satisfied","satisfaction","celebrate","celebrat","fun"
+    ]
 
+    private var sadness: Set<String> = [
+      "sad","sadness","regret","miss","missing","lonely","alone","loss","losing","grief",
+      "heartbroken","down","blue","low","drained","exhausted","tired","bored","boring","boredom",
+      "monotony","monotonous","tedious","tedium","homesick","homesickness","nostalgic","nostalgia",
+      "disappointed","let down","gutted","bereft","shattered","knackered"
+    ]
+
+    private var anger: Set<String> = [
+      "angry","anger","furious","mad","irritated","annoyed","peeved","pissed off","miffed","rage",
+      "seething","fuming","livid","resent","resentful","unfair","injustice","betray","crossed a line",
+      "frustrat","frustrated","frustrating","frustration","wound up"
+    ]
+
+    private var fear: Set<String> = [
+      "afraid","scared","fear","anxious","anxiety","worried","worry","nervous","on edge","jittery",
+      "overwhelm","overwhelmed","panic","panicked","terrified","petrified","dread","uneasy",
+      "apprehensive","concern","concerned","worrying"
+    ]
+
+    private var surprise: Set<String> = [
+      "surprised","shocked","shock","sudden","unexpected","didn't expect","did not expect",
+      "out of nowhere","whoa","wow","gobsmacked","flabbergasted","stunned","took me by surprise"
+    ]
+
+    private var disgust: Set<String> = [
+      "disgust","disgusted","gross","nasty","repulsed","revolting","can't stand","cannot stand",
+      "yuck","eww","icky","vile","minging","manky","rank","foul","nauseous","sickening"
+    ]
+
+    // Keep neutral tokens — they matter for low-affect entries.
+    // (We previously removed their scoring entirely; that caused many mismatches.)
+    private var neutral: Set<String> = [
+      "note","noticed","observing","log","track","journal","record","write",
+      "today","this morning","this evening","update","check-in","check in"
+    ]
+    
+    
     // High-precision patterns (regex) → direct boosts
     private lazy var patterns: [(NSRegularExpression, (inout [Int: Double]) -> Void)] = {
         func rx(_ p: String) -> NSRegularExpression { try! NSRegularExpression(pattern: p, options: [.caseInsensitive]) }
         return [
-            // Regret / counterfactuals → Sadness
+            // Life-event joy
+            (rx(#"\b(?:first )?birthday\b"#), { $0[1, default:0] += 3 }),
+            (rx(#"\banniversar(?:y|ies)\b"#), { $0[1, default:0] += 2.5 }),
+            (rx(#"\bmilestone\b"#), { $0[1, default:0] += 1.5 }),
+            (rx(#"\bhad a blast\b"#), { $0[1, default:0] += 3 }),
+            (rx(#"\bso happy\b"#), { $0[1, default:0] += 2.0 }),
+
+            // Regret → Sadness
             (rx(#"\bi regret\b"#), { $0[2, default:0] += 3 }),
-            (rx(#"\bif only I (?:had|didn't|did not)\b"#), { $0[2, default:0] += 2.5 }),
-            // Pride / gratitude → Joy
-            (rx(#"\bI(?:'m| am) proud\b"#), { $0[1, default:0] += 3 }),
-            (rx(#"\bgrateful\b"#), { $0[1, default:0] += 2.5 }),
-            // Fear
-            (rx(#"\bI(?:'m| am) afraid\b"#), { $0[4, default:0] += 3 }),
-            (rx(#"\bworried\b"#), { $0[4, default:0] += 2 }),
-            // Anger / unfairness
-            (rx(#"\b(?:angry|furious|betray(?:ed)?|unfair)\b"#), { $0[3, default:0] += 3 }),
-            // Surprise
-            (rx(#"\b(?:didn'?t expect|out of nowhere|sudden(?:ly)?)\b"#), { $0[5, default:0] += 2.5 }),
-            // Disgust
-            (rx(#"\b(?:disgust(?:ed|ing)?|gross|can't stand|cannot stand)\b"#), { $0[6, default:0] += 3 }),
-            // Frustration → Anger
+
+            // Frustration → Anger (but not "not frustrated")
             (rx(#"(?<!not )\bfrustrat(?:ed|ing|ion)?\b"#), { $0[3, default:0] += 3.0 }),
+
             // Concern → Fear
             (rx(#"\bconcern(?:ed|ing)?\b"#), { $0[4, default:0] += 2.0 }),
-            // Satisfaction → Joy (low)
-            (rx(#"\bsatisf(?:ied|action)\b"#), { $0[1, default:0] += 1.2 }),
+
+            // Nostalgia → Sadness (mild)
+            (rx(#"\bnostalg(?:ic|ia)\b"#), { $0[2, default:0] += 1.8 }),
+
+            // Surprise
+            (rx(#"\b(didn'?t expect|out of nowhere|sudden(?:ly)?)\b"#), { $0[5, default:0] += 2.5 }),
+
+            // Disgust
+            (rx(#"\b(disgust(?:ed|ing)?|gross|can't stand|cannot stand)\b"#), { $0[6, default:0] += 3 }),
+
+            // Slang: "mad good/fun/..." is positive — damp anger if any
+            (rx(#"\bmad (?:good|fun|love|respect|skills?)\b"#), { scores in
+                scores[1, default:0] += 1.2
+                scores[3, default:0] -= 1.0
+            })
         ]
     }()
 
@@ -134,21 +189,19 @@ public final class RuleEmotionClassifierPro: @unchecked Sendable {
         // 4) Fallback neutral if no signal
         if scores.values.allSatisfy({ $0 == 0 }) { scores[7] = 1 }
 
-        // 5) Decide winner or Mixed based on margin
+        // 5) Decide winner or Mixed based on margin and opposing valence
         let sorted = scores.sorted { $0.value > $1.value }
         let top = sorted.first!
-        let second = sorted.dropFirst().first ?? (7,0)
-        
+        let second = sorted.dropFirst().first ?? (7, 0.0)
+
         // Opposing-valence Mixed rule: Joy vs (Anger|Fear|Sadness) both present
         let joyScore = scores[1] ?? 0
-        let negMax = max(scores[2] ?? 0, scores[3] ?? 0, scores[4] ?? 0)
-
+        let negMax  = max(scores[2] ?? 0, scores[3] ?? 0, scores[4] ?? 0)
         let mixedOpposing = (joyScore > 0.8 && negMax > 0.8) &&
-                            ((abs(joyScore - negMax) / max(1.0, max(joyScore, negMax))) < 0.5)
+                            ((abs(joyScore - negMax) / max(1.0, max(joyScore, negMax))) < 0.55)
 
         let isMixed = mixedOpposing || (second.1 > 0 && (top.1 - second.1) / max(1.0, top.1) < mixedMargin)
         let id = isMixed ? 8 : top.0
-
         return Result(id: id, label: labelFor(id), scores: scores)
     }
 
@@ -253,9 +306,10 @@ public final class RuleEmotionClassifierPro: @unchecked Sendable {
         for ch in text { if let id = emojiMap[ch] { scores[id, default:0] += 1.0 } }
         let bangs = text.filter { $0 == "!" }.count
         if bangs > 0 {
-            // add proportional boost to the current top category (if any yet), else anger/surprise
-            let top = scores.sorted { $0.value > $1.value }.first?.key
-            let target = top ?? 3
+            // Prefer boosting Joy if there is any positive signal; else Surprise; else current top
+            let hasJoy = (scores[1] ?? 0) > 0
+            let hasSurprise = (scores[5] ?? 0) > 0
+            let target = hasJoy ? 1 : (hasSurprise ? 5 : (scores.sorted { $0.value > $1.value }.first?.key ?? 5))
             scores[target, default:0] += Double(bangs) * exclaimAmpPerBang * max(1.0, scores[target] ?? 1.0)
         }
         // many question marks can lean Surprise a bit

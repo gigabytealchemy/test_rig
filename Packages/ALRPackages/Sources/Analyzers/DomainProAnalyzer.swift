@@ -51,10 +51,10 @@ public final class DomainClassifierPro: @unchecked Sendable {
     ]
 
     // MARK: - Tunables
-    private let phraseHit: Double = 2.2       // weight per phrase regex hit
+    private let phraseHit: Double = 2.5       // weight per phrase regex hit
     private let keywordHit: Double = 1.0      // weight per keyword hit
     private let lastSentenceBonus: Double = 1.3
-    private let minReportScore: Double = 0.8  // domains scoring below are dropped from ranked output
+    private let minReportScore: Double = 0.5  // domains scoring below are dropped from ranked output
 
     // MARK: - Lexicons
     // Keywords are lowercased stems or full terms; phrases handled by regexPhrases
@@ -172,11 +172,14 @@ public final class DomainClassifierPro: @unchecked Sendable {
             "Exercise/Fitness": [ #"\\b(5k|10k|marathon|half marathon)\\b"#, #"\\bpersonal best\\b"# ],
             "Family": [ #"\\b(first )?birthday\\b"#, #"\\bfamily (dinner|gathering|reunion)\\b"# ],
             "Relationships/Marriage/Partnership": [ #"\\bdate night\\b"#, #"\\bmarriage counseling|couples therapy\\b"# ],
-            "Food/Eating": [ #"\\b(gluten[- ]free|dairy[- ]free|vegan|vegetarian)\\b"#, #"\\bhome[- ]cooked\\b"# ],
+            "Food/Eating": [ #"\\b(gluten[- ]free|dairy[- ]free|vegan|vegetarian)\\b"#, #"\\bhome[- ]cooked\\b"#, #"\bfamily dinner\b"#],
             "Work/Career": [ #"\\bperformance review\\b"#, #"\\b(rfa|rfc|okr|offsite)\\b"#, #"\\bcode review\\b"#,
-                             #"\\b(work(ed)? online)\\b"#, #"\\b(an assignment.*rejected)\\b"#],
+                             #"\\b(work(ed)? online)\\b"#, #"\\b(an assignment.*rejected)\\b"#, #"\b(first|back) day back to work\b"#, #"\b(work(ed)? online)\b"#,
+                             #"\b(an assignment.*rejected)\b"#],
             "Money/Finances": [ #"\\bcredit card\\b"#, #"\\b(loan|mortgage) approval\\b"#, #"\\bdirect deposit\\b"#,
-                                #"\\b(earnings goal)\\b"#, #"\\b(pay(ing)? bills)\\b"#, #"\\b(make money)\\b"# ],
+                                #"\\b(earnings goal)\\b"#, #"\\b(pay(ing)? bills)\\b"#, #"\\b(make money)\\b"#, #"\b(earnings goal)\b"#,
+                                #"\b(pay(ing)? bills)\b"#,
+                                #"\b(make money)\b"#],
             "School/Learning": [ #"\\bfinal exam\\b"#, #"\\bpeer review\\b"#, #"\\bgroup project\\b"# ],
             "Spirituality/Religion": [ #"\\bsunday service\\b"#, #"\\b(quiet )?time with god\\b"# ],
             "Recreation/Leisure": [ #"\\bmovie night\\b"#, #"\\bgame night\\b"#, #"\\blive music\\b"# ],
