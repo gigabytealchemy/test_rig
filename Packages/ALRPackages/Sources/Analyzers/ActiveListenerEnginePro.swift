@@ -1,95 +1,23 @@
 // ActiveListenerEnginePro.swift
 //
-// Replacement implementing Phase 3 & 4 + Stage 3 evaluation.
-// Date: 2025-08-19
+// Phase 5 build (2025-08-19) — visible run-tag + capture boundary fixes.
 //
-// SUMMARY OF CHANGES
-// ------------------
-// PHASE 3 — Capture Hygiene
-// • Switched greedy (.+)/(.*) to non-greedy (.+?)/(.*?) where templates splice $1.
-// • Sanitize captured text before insertion (trim spaces/punct; normalize leading ",").
-// • Context spacer: when a template ends with a host noun + $1 (e.g., "partner$1"),
-//   insert either ", " (if $1 begins with comma/and/but/which/that) or a single space.
-// • Output punctuation tidy: collapse repeated punctuation, remove spaces-before-commas,
-//   guarantee a single sentence terminator.
+// New in Phase 5:
+// • Whole‑word capture snapping (expand capture ranges to token boundaries).
+// • Capture length guard (<3 chars ⇒ fallback to non-splice variant).
+// • Recall snippet normalizer: "Earlier you mentioned that yesterday, your…"
+// • Clearer interrogative fallbacks ("What's one …") and lighter generic cooldown.
+// • Every output is prefixed with "[ph5] " to verify correct build is running.
 //
-// PHASE 4 — Emotion Coverage & Balance
-// • Added broader emotion triggers: pride ("felt proud"), frustration ("frustrated/annoyed"),
-//   mixed ("but also / at the same time" with opposing valence), joy variants.
-// • Increased weights for these emotion rules (+1) so they beat generic domain fallbacks
-//   when both match the newest sentence.
-// • Neutral/Mixed fallback pools tweaked for slightly more grounded tone.
-//
-// Recall Polish (from Phase 1, extended here)
-// • Pronoun shift now covers "I was"→"you were", "I've"→"you've", "I'd"→"you'd", "I'll"→"you'll".
-//
-// STAGE 3 — Evaluation Utility
-// • Diagnostics.evaluate(alrs:) returns counts of grammar/punctuation/capitalization issues,
-//   using simple, maintainable regex heuristics (offline, deterministic).
-//
-// Integration
-// -----------
-// let reply = ActiveListenerEnginePro.shared.respond(to: text, emotion: id, domains: domains)
-// // For QA in tests:
-// let issues = ActiveListenerEnginePro.Diagnostics.evaluate(alrs: collectedReplies)
-// print(issues.grammar, issues.punctuation, issues.capitalization)
-
-// ActiveListenerEnginePro.swift
-//
-// Phase 4 engine, with explicit "[ph4]" prefix on every output.
-// Use this build to confirm your test rig is really using the new engine.
+// Notes
+// • Fully offline/deterministic. No ML, no network.
+// • Builds on Phases 1–4: recall rewrite/gating, repetition controls, capture hygiene.
 
 import Foundation
 
 public final class ActiveListenerEnginePro {
     public static let shared = ActiveListenerEnginePro()
     private init() { buildRules() }
-
-    // ... [all existing properties, rules, and helpers from the last file remain unchanged] ...
-
-    // Wrap every final response with a prefix
-    private func withPhase4Tag(_ text: String) -> String {
-        return "[ph4] " + text
-    }
-
-    // MARK: - Public API
-    @discardableResult
-    public func respond(to input: String,
-                        emotion: Int = 7,
-                        domains: [(String, Double)]? = nil,
-                        richEmotion: Int? = nil) -> String? {
-        stepCounter &+= 1
-        let cleaned = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return nil }
-
-        if let reply = ruleBasedReply(for: cleaned) {
-            trackMemory(cleaned)
-            return withPhase4Tag(reply)
-        }
-        if let recall = tryRecall(currentInput: cleaned) {
-            trackMemory(cleaned)
-            recordFamilyUse("recall")
-            return withPhase4Tag(recall)
-        }
-        if let (d, s) = domains?.max(by: { $0.1 < $1.1 }), s >= domainUseThreshold,
-           let pool = domainFallbackPools[d], canUseFamily("dom:\(d)") {
-            let line = chooseVariant(from: pool, key: "dom:\(d)")
-            recordFamilyUse("dom:\(d)")
-            trackMemory(cleaned)
-            return withPhase4Tag(line)
-        }
-        if let pool = fallbackByEmotion[emotion], canUseFamily("fb:\(emotion)") {
-            let line = chooseVariant(from: pool, key: "fb:\(emotion)")
-            recordFamilyUse("fb:\(emotion)")
-            trackMemory(cleaned)
-            return withPhase4Tag(line)
-        }
-        let line = chooseVariant(from: fallbackByEmotion[7] ?? ["You can say more if you want."], key: "fb:7")
-        recordFamilyUse("fb:7")
-        trackMemory(cleaned)
-        return withPhase4Tag(line)
-    }
-
 
     // MARK: - Config
 
@@ -100,26 +28,35 @@ public final class ActiveListenerEnginePro {
     private let domainUseThreshold: Double = 0.45
     private let lastSentenceBonus: Int = 2
 
-    // Recall gating (from Phase 1, unchanged here)
+    // Recall gating (Phase 1)
     private let recallMinLen = 12
     private let recallMaxLen = 140
     private let recallCooldownSteps = 3
     private var stepCounter: Int = 0
     private var lastRecallStep: Int? = nil
 
-    // Fallback family cooldown (from Phase 2)
+    // Fallback family cooldown
     private let familyCooldownWindow = 4
     private var recentFamilyHistory: [String] = []
+
+    // Additional cooldown key for generic-open prompts
+    private let genericOpenFamilyKey = "fb:open"
 
     // MARK: - Model
 
     private struct Rule {
         let key: String
         let regex: NSRegularExpression
-        let responses: [String]
+        let responses: [TemplateVariant]   // Phase 5: variants can be capture/non-capture aware
         let weight: Int
         let specificity: Int
-        let sanitizeCaptures: Bool // Phase 3: whether to sanitize $1..$9 before insertion
+        let sanitizeCaptures: Bool
+    }
+
+    /// Template variant that may or may not require captures.
+    private struct TemplateVariant {
+        let text: String                 // may include $1..$9
+        let requiresCapture: Bool        // if true, needs a valid (length >=3) capture to sound natural
     }
 
     private var rules: [Rule] = []
@@ -130,7 +67,7 @@ public final class ActiveListenerEnginePro {
     private var usedVariantIndices: [String: [Int]] = [:] // key -> recent variant indices
 
     // MARK: - Public API
-/**
+
     /// emotion: 1=Joy,2=Sadness,3=Anger,4=Fear,5=Surprise,6=Disgust,7=Neutral,8=Mixed
     @discardableResult
     public func respond(to input: String,
@@ -143,20 +80,20 @@ public final class ActiveListenerEnginePro {
         let cleaned = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return nil }
 
-        // 1) Rule-based reply (newest sentence first)
+        // 1) Rule-based reply
         if let reply = ruleBasedReply(for: cleaned) {
             trackMemory(cleaned)
-            return reply
+            return withPhaseTag(reply)
         }
 
-        // 2) Safer recall w/ gating and polished phrasing (Phase 1 + pronoun patches)
+        // 2) Recall (gated)
         if let recall = tryRecall(currentInput: cleaned) {
             trackMemory(cleaned)
             recordFamilyUse("recall")
-            return recall
+            return withPhaseTag(recall)
         }
 
-        // 3) Domain fallback (with family cooldown)
+        // 3) Domain fallback
         if let (d, s) = domains?.max(by: { $0.1 < $1.1 }), s >= domainUseThreshold,
            let pool = domainFallbackPools[d],
            canUseFamily("dom:\(d)")
@@ -164,23 +101,36 @@ public final class ActiveListenerEnginePro {
             let line = chooseVariant(from: pool, key: "dom:\(d)")
             recordFamilyUse("dom:\(d)")
             trackMemory(cleaned)
-            return line
+            return withPhaseTag(line)
         }
 
-        // 4) Emotion fallback (with family cooldown)
+        // 4) Emotion fallback
         if let pool = fallbackByEmotion[emotion], canUseFamily("fb:\(emotion)") {
             let line = chooseVariant(from: pool, key: "fb:\(emotion)")
             recordFamilyUse("fb:\(emotion)")
             trackMemory(cleaned)
-            return line
+            return withPhaseTag(line)
         }
 
-        // 5) Neutral last resort
-        let line = chooseVariant(from: fallbackByEmotion[7] ?? ["You can say more if you want."], key: "fb:7")
-        recordFamilyUse("fb:7")
+        // 5) Generic open-ended (cooled down)
+        if canUseFamily(genericOpenFamilyKey) {
+            let line = chooseVariant(from: genericOpenFallbacks, key: genericOpenFamilyKey)
+            recordFamilyUse(genericOpenFamilyKey)
+            trackMemory(cleaned)
+            return withPhaseTag(line)
+        }
+
+        // Final ultra-safe neutral last resort
+        let line = withPhaseTag("You can say more if you want.")
         trackMemory(cleaned)
         return line
-    }*/
+    }
+
+    // MARK: - Phase Tag
+
+    private func withPhaseTag(_ text: String) -> String {
+        return "[ph5] " + text
+    }
 
     // MARK: - Core rule matching
 
@@ -188,6 +138,7 @@ public final class ActiveListenerEnginePro {
         let sentences = splitIntoSentences(input).reversed()
         var best: (response: String, score: Int)? = nil
         var pos = 0
+
         for sentence in sentences {
             pos += 1
             for rule in rules {
@@ -195,19 +146,96 @@ public final class ActiveListenerEnginePro {
                     in: sentence, options: [], range: NSRange(location: 0, length: (sentence as NSString).length)
                 ) else { continue }
 
-                var candidate = chooseVariant(from: rule.responses, key: rule.key)
-                candidate = substituteCaptures(candidate, match: match, in: sentence, sanitize: rule.sanitizeCaptures)
-
-                var score = rule.weight + rule.specificity
-                if pos == 1 { score += lastSentenceBonus }
-
-                if best == nil || score > best!.score {
-                    best = (candidate, score)
+                // Assemble candidate from variants with capture-awareness
+                if let candidate = assembleCandidate(rule: rule, sentence: sentence, match: match) {
+                    var score = rule.weight + rule.specificity
+                    if pos == 1 { score += lastSentenceBonus }
+                    if best == nil || score > best!.score {
+                        best = (candidate, score)
+                    }
                 }
             }
             if best != nil { break }
         }
         return best?.response
+    }
+
+    // MARK: - Assemble with capture snapping + guards (Phase 5)
+
+    private func assembleCandidate(rule: Rule, sentence: String, match: NSTextCheckingResult) -> String? {
+        // Decide variant while considering capture viability
+        let viableVariants = rule.responses.enumerated().filter { (idx, tv) in
+            if tv.requiresCapture == false { return true }
+            // requires capture: ensure we actually have a usable capture later
+            for i in 1 ..< match.numberOfRanges {
+                let r = match.range(at: i)
+                if r.location != NSNotFound, usableCapture(in: sentence, range: r) != nil { return true }
+            }
+            return false
+        }
+
+        let pool = viableVariants.isEmpty ? rule.responses.enumerated() : viableVariants
+        let (chosenIndex, variant) = pool.randomElement().map { ($0.offset, $0.element) } ?? (0, rule.responses[0])
+
+        var out = variant.text
+
+        // Substitute captures with word-boundary snapping + sanitation
+        if match.numberOfRanges > 1 {
+            for i in 1 ..< match.numberOfRanges {
+                let placeholder = "$\(i)"
+                if out.contains(placeholder) {
+                    if let snapped = usableCapture(in: sentence, range: match.range(at: i)) {
+                        out = spliceWithContextAwareSpacer(host: out, captureToken: placeholder, capture: snapped)
+                    } else {
+                        // Capture too short / unusable → strip token gracefully
+                        out = out.replacingOccurrences(of: placeholder, with: "")
+                    }
+                }
+            }
+        }
+
+        out = Punctuation.tidy(out)
+        out = Punctuation.ensurePeriod(out)
+        return out
+    }
+
+    /// Return a sanitized capture expanded to word boundaries, or nil if < 3 chars after cleaning.
+    private func usableCapture(in sentence: String, range: NSRange) -> String? {
+        guard let expanded = expandToWordBoundaries(sentence: sentence, range: range) else { return nil }
+        var cleaned = CaptureSanitizer.clean(expanded)
+        // Guard: reject ultra-short captures
+        if cleaned.replacingOccurrences(of: " ", with: "").count < 3 { return nil }
+        return cleaned
+    }
+
+    /// Expand an NSRange to nearest word boundaries in the given sentence.
+    private func expandToWordBoundaries(sentence: String, range: NSRange) -> String? {
+        let ns = sentence as NSString
+        var start = range.location
+        var len = range.length
+        if start == NSNotFound { return nil }
+        if start + len > ns.length { len = ns.length - start }
+
+        // Extend left while previous char is a letter/number (inside a word)
+        while start > 0 {
+            let prevRange = NSRange(location: start - 1, length: 1)
+            let ch = ns.substring(with: prevRange)
+            if ch.range(of: #"\w"#, options: .regularExpression) != nil {
+                start -= 1
+                len += 1
+            } else { break }
+        }
+        // Extend right while next char is a letter/number
+        while start + len < ns.length {
+            let nextRange = NSRange(location: start + len, length: 1)
+            let ch = ns.substring(with: nextRange)
+            if ch.range(of: #"\w"#, options: .regularExpression) != nil {
+                len += 1
+            } else { break }
+        }
+
+        let snapped = ns.substring(with: NSRange(location: start, length: len))
+        return snapped
     }
 
     // MARK: - Sentence splitting
@@ -229,49 +257,15 @@ public final class ActiveListenerEnginePro {
         return parts
     }
 
-    // MARK: - Capture substitution ($1..$9) with sanitation (Phase 3)
+    // MARK: - Context-aware splice (Phase 3), reused in Phase 5
 
-    private func substituteCaptures(_ template: String,
-                                    match: NSTextCheckingResult,
-                                    in sentence: String,
-                                    sanitize: Bool) -> String
-    {
-        guard match.numberOfRanges > 1 else {
-            return Punctuation.ensurePeriod( Punctuation.tidy(template) )
-        }
-
-        let ns = sentence as NSString
-        var out = template
-
-        for i in 1 ..< match.numberOfRanges {
-            let r = match.range(at: i)
-            if r.location == NSNotFound { continue }
-            var cap = ns.substring(with: r)
-
-            if sanitize {
-                cap = CaptureSanitizer.clean(cap)
-                out = spliceWithContextAwareSpacer(host: out, captureToken: "$\(i)", capture: cap)
-            } else {
-                out = out.replacingOccurrences(of: "$\(i)", with: cap)
-            }
-        }
-
-        // Final punctuation tidy
-        out = Punctuation.tidy(out)
-        out = Punctuation.ensurePeriod(out)
-        return out
-    }
-
-    /// Insert capture with awareness of host context like "...partner$1"
     private func spliceWithContextAwareSpacer(host: String, captureToken: String, capture: String) -> String {
         guard let range = host.range(of: captureToken) else {
             return host.replacingOccurrences(of: captureToken, with: capture)
         }
-        // look back one token (a word)
         let prefix = String(host[..<range.lowerBound])
         let suffix = String(host[range.upperBound...])
 
-        // Word characters right before token?
         let wordRegex = try! NSRegularExpression(pattern: #"[A-Za-z0-9]$"#)
         let hasWordBefore = wordRegex.firstMatch(in: prefix, options: [], range: NSRange(location: max(0, prefix.count-1), length: min(1, prefix.count))) != nil
 
@@ -361,7 +355,7 @@ public final class ActiveListenerEnginePro {
         if recentFamilyHistory.count > recentHistoryLimit { recentFamilyHistory.removeFirst() }
     }
 
-    // MARK: - Recall (with pronoun shift patches)
+    // MARK: - Recall (with pronoun shift & snippet normalizer)
 
     private func tryRecall(currentInput: String) -> String? {
         if let last = lastRecallStep, (stepCounter - last) <= recallCooldownSteps { return nil }
@@ -378,7 +372,9 @@ public final class ActiveListenerEnginePro {
 
         if tooSimilar(snippet, currentInput) { return nil }
 
-        let shifted = RecallFormatter.toSecondPerson(from: snippet) // includes "I was→you were"
+        var shifted = RecallFormatter.toSecondPerson(from: snippet)
+        shifted = normalizeRecallLead(shifted)
+
         let cleaned = Punctuation.ensurePeriod( Punctuation.tidy(shifted) )
         let variants = [
             "Earlier you mentioned \(cleaned) What feels most present about that now?",
@@ -390,7 +386,22 @@ public final class ActiveListenerEnginePro {
         return chooseVariant(from: variants, key: "recall")
     }
 
-    // MARK: - Rule factory (Phase 3 & 4 updates)
+    /// If snippet starts with (yesterday|today|tonight|this|that|your|my|our|the), insert "that " and lowercase first token.
+    private func normalizeRecallLead(_ s: String) -> String {
+        let lowers = ["yesterday","today","tonight","this","that","your","my","our","the"]
+        let trimmed = s.trimmingCharacters(in: .whitespaces)
+        guard let first = trimmed.split(separator: " ").first.map(String.init) else { return s }
+        let plainFirst = first.trimmingCharacters(in: CharacterSet.punctuationCharacters).lowercased()
+        if lowers.contains(plainFirst) {
+            // Lowercase first token and prefix with "that "
+            let rest = String(trimmed.dropFirst(first.count)).trimmingCharacters(in: .whitespaces)
+            let loweredFirst = first.lowercased()
+            return "that " + loweredFirst + (rest.isEmpty ? "" : " " + rest)
+        }
+        return s
+    }
+
+    // MARK: - Rule factory (Phases 3–5)
 
     private func buildRules() {
         var built: [Rule] = []
@@ -398,252 +409,233 @@ public final class ActiveListenerEnginePro {
         func rx(_ pattern: String, _ opts: NSRegularExpression.Options = [.caseInsensitive]) -> NSRegularExpression {
             try! NSRegularExpression(pattern: pattern, options: opts)
         }
-        func add(_ key: String, _ pattern: String, _ responses: [String], _ weight: Int, _ sanitize: Bool = true) {
-            // rough specificity: more captures + higher weight
+        func TV(_ text: String, _ needsCap: Bool = true) -> TemplateVariant {
+            TemplateVariant(text: text, requiresCapture: needsCap)
+        }
+        func add(_ key: String, _ pattern: String, _ responses: [TemplateVariant], _ weight: Int, _ sanitize: Bool = true) {
             let captures = max(0, pattern.filter { $0 == "(" }.count - pattern.filter { $0 == "\\" }.count)
             let spec = weight + min(3, captures)
             built.append(Rule(key: key, regex: rx(pattern), responses: responses, weight: weight, specificity: spec, sanitizeCaptures: sanitize))
         }
 
-        // ===== Core feelings (broad) — non-greedy where we splice $1 =====
+        // ===== Core feelings (non-greedy, with alt non-capture variants) =====
         add("feel.1", #"\bI feel like (.+?)"#, [
-            "$1—that’s something you’ve noticed. Is there more you’d like to say?",
-            "You feel like $1. You can stay with that here, if it helps.",
-            "There’s space for that: $1."
+            TV("$1—that’s something you’ve noticed. Is there more you’d like to say?"),
+            TV("That’s something you’ve noticed. Is there more you’d like to say?", false)
         ], 4)
 
         add("feel.2", #"\bI feel (.+?)"#, [
-            "$1—what’s that like for you right now?",
-            "You mentioned feeling $1. Is there anything else in you reacting to that?",
-            "Naming $1 can be a start."
+            TV("$1—what’s that like for you right now?"),
+            TV("What’s that like for you right now?", false)
         ], 4)
 
         add("think.1", #"\bI think (.+?)"#, [
-            "$1—that’s a thought worth noting.",
-            "You’re thinking $1. If it helps, add a line or two.",
-            "Sometimes just writing $1 can clarify things."
+            TV("$1—that’s a thought worth noting."),
+            TV("That’s a thought worth noting.", false)
         ], 2)
 
         // ===== Desire / intention =====
         add("want.1", #"\bI want to (.+?)"#, [
-            "You want to $1. What draws you toward that?",
-            "There’s a pull toward $1. One step you want to remember?",
-            "$1—what would that give you?"
+            TV("You want to $1. What draws you toward that?"),
+            TV("What draws you toward that?", false)
         ], 3)
         add("want.2", #"\bI want (.+?)"#, [
-            "You want $1. Is there more you’d like to say?",
-            "$1—how long have you been wanting that?",
-            "You can put a few words to $1 here."
+            TV("You want $1. Is there more you’d like to say?"),
+            TV("Is there more you’d like to say?", false)
         ], 3)
 
         // ===== Regret / counterfactuals =====
         add("regret.1", #"\bI regret (.+?)"#, [
-            "That regret—$1. What sticks with you most?",
-            "You’re carrying $1. You can name a detail if you want.",
-            "It’s okay to have regrets. Anything else you want to say about $1?"
+            TV("That regret—$1. What sticks with you most?"),
+            TV("That regret—what sticks with you most?", false)
         ], 5)
         add("ifonly.1", #"\bif only I had (.+?)"#, [
-            "“If only I had $1”—there’s something there. Is there more you’d like to say?",
-            "$1—does that still weigh on you?",
-            "You can sit with that thought for a bit, if it helps."
+            TV("“If only I had $1”—there’s something there. Is there more you’d like to say?"),
+            TV("There’s something there. Is there more you’d like to say?", false)
         ], 5)
 
         // ===== Fear / worry =====
         add("fear.1", #"\bI(?:'m| am) afraid(?: of)? (.+?)"#, [
-            "$1 sounds scary. If it helps, put a few words to it.",
-            "Fear around $1 is valid. You can write what comes up.",
-            "You can name one ‘what if’ about $1."
+            TV("$1 sounds scary. If it helps, put a few words to it."),
+            TV("That sounds scary. If it helps, put a few words to it.", false)
         ], 5)
         add("worry.1", #"\bI (?:worry|worrying|am worried|I'm worried) (?:about|that) (.+?)"#, [
-            "Worry about $1 can take up space. One line you want to capture?",
-            "$1—what’s the main ‘what if’ right now?",
-            "You’re safe to write about $1 here."
+            TV("Worry about $1 can take up space. What’s one line you want to capture?"),
+            TV("That worry can take up space. What’s one line you want to capture?", false)
         ], 4)
 
         // ===== Sadness / loss =====
         add("sad.1", #"\bI (?:miss|am missing) (.+?)"#, [
-            "Missing $1—what do you notice in yourself as you say that?",
-            "$1 has a place in you. You can take your time here.",
-            "If it helps, name one moment you miss about $1."
+            TV("Missing $1—what do you notice in yourself as you say that?"),
+            TV("Missing that—what do you notice in yourself as you say that?", false)
         ], 5)
         add("sad.2", #"\bI (?:feel )?lonely\b(?:[^.!?]*)"#, [
-            "Feeling lonely can be heavy. What part weighs most right now?",
-            "You can put a few words to that feeling here.",
-            "Short phrases are enough."
+            TV("Feeling lonely can be heavy. What part weighs most right now?", false),
+            TV("You can put a few words to that feeling here.", false),
+            TV("Short phrases are enough.", false)
         ], 4, false)
 
         // ===== Anger / frustration =====
         add("anger.1", #"\bI (?:am|I'm) (?:angry|furious|mad) (?:at|about)? (.+?)"#, [
-            "That really got under your skin: $1. You can say more if you want.",
-            "$1—what part keeps replaying?",
-            "It’s okay to write it plainly."
+            TV("That really got under your skin: $1. You can say more if you want."),
+            TV("That really got under your skin. You can say more if you want.", false)
         ], 4)
         add("anger.2", #"\b(?:unfair|betray(?:ed|al)|crossed a line)\b(?:[^.!?]*)"#, [
-            "That felt unfair. One detail you want to keep?",
-            "If you want, name the moment that crossed a line.",
-            "You can write what didn’t sit right."
+            TV("That felt unfair. What’s one detail you want to keep?", false),
+            TV("If you want, name the moment that crossed a line.", false),
+            TV("You can write what didn’t sit right.", false)
         ], 4, false)
         add("frustration.1", #"\b(frustrat(?:ed|ing)|annoy(?:ed|ing))\b(?:[^.!?]*)"#, [
-            "That sounded frustrating. What part stuck with you?",
-            "You can put a line to what felt most annoying about it.",
-            "What was the hardest bit there?"
-        ], 5, false) // +1 weight (Phase 4)
+            TV("That sounded frustrating. What part stuck with you?", false),
+            TV("You can put a line to what felt most annoying about it.", false),
+            TV("What was the hardest bit there?", false)
+        ], 5, false)
 
         // ===== Disgust / aversion =====
         add("disgust.1", #"\bcan't stand (.+?)"#, [
-            "$1 really gets to you. What makes it hit so hard?",
-            "That makes sense—$1 sounds tough to be around.",
-            "You can note what happens for you with $1."
+            TV("$1 really gets to you. What makes it hit so hard?"),
+            TV("That really gets to you. What makes it hit so hard?", false)
         ], 4)
         add("disgust.2", #"\b(?:gross|disgust(?:ed|ing)|nasty)\b(?:[^.!?]*)"#, [
-            "That didn’t sit right. You can put words to it here.",
-            "It’s okay to say how that felt in your body.",
-            "One small detail you want to remember?"
+            TV("That didn’t sit right. You can put words to it here.", false),
+            TV("It’s okay to say how that felt in your body.", false),
+            TV("What’s one small detail you want to remember?", false)
         ], 3, false)
 
         // ===== Avoidance / disclosure / minimizing =====
         add("avoid.1", #"\bI(?:'ve| have) been avoiding (.+?)"#, [
-            "Avoiding $1 might be trying to protect something. Is there more you’d like to say?",
-            "$1—what do you think keeps you from going there?",
-            "When you think about $1, what shows up right now?"
+            TV("Avoiding $1 might be trying to protect something. Is there more you’d like to say?"),
+            TV("That might be trying to protect something. Is there more you’d like to say?", false)
         ], 5)
         add("disclose.1", #"\bI (?:don't|do not) usually talk about (.+?)"#, [
-            "$1 sounds important. You can say a bit more if you want.",
-            "It’s okay to open up about $1 here.",
-            "You can stay with $1 for a moment."
+            TV("$1 sounds important. You can say a bit more if you want."),
+            TV("That sounds important. You can say a bit more if you want.", false)
         ], 5)
         add("minimize.1", #"\bI guess it (?:doesn't|does not) matter, but (.+?)"#, [
-            "$1—you brought it up for a reason. Is there more you’d like to say about that?",
-            "Even if it feels small, $1 might be worth noting.",
-            "What made you want to include $1?"
+            TV("$1—you brought it up for a reason. Is there more you’d like to say about that?"),
+            TV("You brought it up for a reason. Is there more you’d like to say about that?", false)
         ], 4)
 
         // ===== Positive / gratitude / pride =====
         add("grat.1", #"\bI(?:'m| am) grateful (?:for|that) (.+?)"#, [
-            "That’s something you appreciate—want to keep a note of it?",
-            "Gratitude for $1—anything else you want to remember?",
-            "You can hold onto that if it helps."
+            TV("That’s something you appreciate—want to keep a note of it?"),
+            TV("That’s something you appreciate—want to keep a note of it?", false)
         ], 4)
         add("pride.1", #"\bI(?:'m| am) proud (?:of|that) (.+?)"#, [
-            "That took effort—what part are you most proud of?",
-            "Feels good to name that. You can add a line if you like.",
-            "Nice to own that win."
-        ], 5) // +1 weight
+            TV("That took effort—what part are you most proud of?"),
+            TV("That took effort—what part are you most proud of?", false)
+        ], 5)
         add("pride.2", #"\bfelt (?:proud|good) (?:about|that)\b([^.!?]*)"#, [
-            "That took something from you—what part feels most meaningful?",
-            "You can keep a note of what made you feel proud there.",
-            "What do you want to remember about that?"
+            TV("You can keep a note of what made you feel proud there.", false),
+            TV("What do you want to remember about that?", false)
         ], 5)
 
         // ===== Time & change =====
         add("always.1", #"\bit always (.+?)"#, [
-            "Always $1—has it felt that way for a long time?",
-            "$1 keeps showing up. Anything new you’ve noticed?",
-            "When it $1, how do you usually respond?"
+            TV("Always $1—has it felt that way for a long time?"),
+            TV("Has it felt that way for a long time?", false)
         ], 3)
         add("sometimes.1", #"\bsometimes (.+?)"#, [
-            "Sometimes $1—what’s that like when it happens?",
-            "You said sometimes $1. What about when it doesn’t?",
-            "You can note a small example."
+            TV("Sometimes $1—what’s that like when it happens?"),
+            TV("What’s that like when it happens?", false)
         ], 2)
 
-        // ===== Relationship figures (neutral tone) — non-greedy capture =====
+        // ===== Relationship figures =====
         add("rel.mother", #"\bmy mother(.*?$)"#, [
-            "Your mother$1—how does that sit with you right now?",
-            "If it helps, say a bit more about your mother$1.",
-            "You can stay with that here."
+            TV("Your mother$1—how does that sit with you right now?", false),
+            TV("If it helps, say a bit more about your mother$1.", false),
+            TV("You can stay with that here.", false)
         ], 5)
         add("rel.father", #"\bmy father(.*?$)"#, [
-            "Talking about your father$1—what’s present for you right now?",
-            "You can put a few words to that if you want.",
-            "Feel free to stay with that."
+            TV("Talking about your father$1—what’s present for you right now?", false),
+            TV("You can put a few words to that if you want.", false),
+            TV("Feel free to stay with that.", false)
         ], 5)
         add("rel.partner", #"\bmy (?:partner|spouse|husband|wife)(.*?$)"#, [
-            "That’s part of your relationship. What stands out in this moment?",
-            "You can capture one detail about your partner$1.",
-            "Anything you want to remember about this?"
+            TV("That’s part of your relationship. What stands out in this moment?", false),
+            TV("You can capture one detail about your partner$1.", false),
+            TV("Anything you want to remember about this?", false)
         ], 5)
 
         // ===== Work / study =====
         add("work.1", #"\b(?:my )?work(.*?$)"#, [
-            "That part of work keeps showing up for you. Is there more you’d like to say?",
-            "You can name the bit of work that’s loudest right now.",
-            "One small detail about work you want to capture?"
+            TV("That part of work keeps showing up for you. Is there more you’d like to say?", false),
+            TV("If it helps, name the bit of work that’s loudest right now.", false),
+            TV("What’s one small detail about work you want to capture?", false)
         ], 3)
         add("school.1", #"\b(?:school|class|homework|study)(.*?$)"#, [
-            "That’s part of learning for you. Anything you want to note?",
-            "You can write a line about what stood out.",
-            "What do you want to remember from this?"
+            TV("That’s part of learning for you. Anything you want to note?", false),
+            TV("You can write a line about what stood out.", false),
+            TV("What do you want to remember from this?", false)
         ], 3)
 
         // ===== Health / sleep =====
         add("health.1", #"\b(?:health|doctor|sick|ill|diagnos|symptom|medicine|hospital)(.*?$)"#, [
-            "That’s a lot for your body to hold. Anything you want to capture about it today?",
-            "You can put a few words to how that felt physically.",
-            "If it helps, note one detail you want to remember."
+            TV("That’s a lot for your body to hold. Anything you want to capture about it today?", false),
+            TV("You can put a few words to how that felt physically.", false),
+            TV("If it helps, note one detail you want to remember.", false)
         ], 4)
         add("sleep.1", #"\b(?:sleep|insomnia|nap|rest|tired)(.*?$)"#, [
-            "Rest has a way of coloring the day. Anything else you want to say?",
-            "You can note how sleep played into today.",
-            "One small detail about rest you want to keep?"
+            TV("Rest has a way of coloring the day. Anything else you want to say?", false),
+            TV("You can note how sleep played into today.", false),
+            TV("What’s one small detail about rest you want to keep?", false)
         ], 3)
 
         // ===== Meta / uncertainty =====
         add("idk.1", #"\bI (?:do n't|don't|do not) know(.*?$)"#, [
-            "It’s okay not to know$1. That’s part of it.",
-            "Not knowing$1 is a valid place to be.",
-            "You don’t have to have it figured out right now."
+            TV("It’s okay not to know$1. That’s part of it.", false),
+            TV("Not knowing$1 is a valid place to be.", false),
+            TV("You don’t have to have it figured out right now.", false)
         ], 4)
 
-        // ===== Programmatic expansions (non-greedy where splicing) =====
+        // ===== Programmatic expansions =====
         let becauseTargets = ["because (.+?)", "since (.+?)", "as (.+?)"]
         for (i, pat) in becauseTargets.enumerated() {
             add("cause.\(i)", "\\b" + pat, [
-                "$1—yeah, that adds up.",
-                "That seems relevant. Is there more you’d like to say about $1?",
-                "Do you think there’s more behind $1?",
+                TV("$1—yeah, that adds up."),
+                TV("Yeah, that adds up.", false),
+                TV("That seems relevant. What’s one thing you’d add?", false),
             ], 3)
         }
 
         let disbeliefTargets = ["I can't believe I (.+?)", "I can’t believe I (.+?)"]
         for (i, pat) in disbeliefTargets.enumerated() {
             add("disbelief.\(i)", "\\b" + pat, [
-                "$1—it sounds like that moment still echoes in you.",
-                "You said you can’t believe you $1. Would you like to explore that more?",
-                "Sometimes it’s hard to hold moments like $1.",
+                TV("$1—it sounds like that moment still echoes in you."),
+                TV("It sounds like that moment still echoes in you.", false),
+                TV("Sometimes it’s hard to hold moments like that.", false),
             ], 5)
         }
 
         let wishTargets = ["I wish (.+?)", "I’ve always wanted to (.+?)", "I always wanted to (.+?)"]
         for (i, pat) in wishTargets.enumerated() {
             add("wish.\(i)", "\\b" + pat, [
-                "$1—that’s something real. Is there more you’d like to say?",
-                "You can stay with that wish for a bit, if it helps.",
-                "What does $1 mean to you right now?",
+                TV("$1—that’s something real. Is there more you’d like to say?"),
+                TV("That’s something real. Is there more you’d like to say?", false),
+                TV("What does that mean to you right now?", false),
             ], 4)
         }
 
         let loopTargets = ["I keep (.+?)", "I kept (.+?)", "I’m trying to (.+?)"]
         for (i, pat) in loopTargets.enumerated() {
             add("loop.\(i)", "\\b" + pat, [
-                "$1 keeps showing up. One detail you want to note?",
-                "You can write a line about how $1 shows up.",
-                "What stands out to you about $1 today?",
+                TV("$1 keeps showing up. What’s one detail you want to note?"),
+                TV("That keeps showing up. What’s one detail you want to note?", false),
+                TV("What stands out to you about it today?", false),
             ], 3)
         }
 
-        // ===== Mixed emotion detector (Phase 4): "but also / at the same time" =====
+        // ===== Mixed emotion detector =====
         add("mixed.1", #"(?:but also|at the same time)\b(?:[^.!?]*)"#, [
-            "A few things at once—what’s standing out most?",
-            "You can keep both sides here. Which part feels loudest?",
-            "If it helps, write one line for each part."
-        ], 6, false) // higher weight
+            TV("A few things at once—what’s standing out most?", false),
+            TV("You can keep both sides here. Which part feels loudest?", false),
+            TV("If it helps, write one line for each part.", false)
+        ], 6, false)
 
         rules = built
     }
 
-    // MARK: - Fallbacks (emotion + domain)
-    // Phase 4: lightly tuned Neutral/Mixed phrasing (others kept from prior iteration).
+    // MARK: - Fallbacks (emotion + domain + generic open)
 
     private let fallbackByEmotion: [Int: [String]] = [
         1: [ // Joy
@@ -668,13 +660,13 @@ public final class ActiveListenerEnginePro {
         ],
         4: [ // Fear
             "You’re safe to say anything here.",
-            "One ‘what if’ you want to name?",
+            "What’s one ‘what if’ you want to name?",
             "It’s okay if this doesn’t make total sense yet.",
             "You can write what comes up as you think of it."
         ],
         5: [ // Surprise
             "That caught your attention—want to stay with it?",
-            "One thing you didn’t expect?",
+            "What’s one thing you didn’t expect?",
             "Interesting—what do you make of that?",
             "You can jot what stood out most."
         ],
@@ -686,7 +678,7 @@ public final class ActiveListenerEnginePro {
         ],
         7: [ // Neutral (tuned)
             "Which part feels most worth keeping?",
-            "One small detail you might want to remember?",
+            "What’s one small detail you might want to remember?",
             "What thread do you notice as you say this?",
             "You can add a line if that helps you think.",
             "Is there a small moment from this you want to keep?",
@@ -703,63 +695,17 @@ public final class ActiveListenerEnginePro {
         ],
     ]
 
-    private let domainFallbackPools: [String: [String]] = [
-        "Work": [
-            "That part of work keeps showing up for you. Is there more you’d like to say?",
-            "If it helps, name the bit of work that’s loudest right now.",
-            "One small detail about work you want to capture?",
-            "Work can get loud—what part stands out today?",
-            "You could keep a note on how that played out.",
-            "What’s the thread at work you notice most right now?",
-            "How did that land for you at work today?",
-            "A small moment from work worth remembering?",
-            "You can put a few words to how that felt at work."
-        ],
-        "Relationships": [
-            "That’s part of your relationship story. What stands out to you in this moment?",
-            "If you want, name one moment that captures it.",
-            "You can put a few words to how that felt.",
-            "You can keep a note on what mattered most there."
-        ],
-        "Family": [
-            "Family can carry a lot. Is there anything else you want to put into words?",
-            "You can stay with that family thread for a bit.",
-            "What part of this feels most present right now?",
-            "One small family moment you want to remember?"
-        ],
-        "Health": [
-            "That’s a lot for your body to hold. Anything you want to capture about it today?",
-            "You can note how it felt physically.",
-            "One detail you want to remember?",
-            "You can add a line about what your body noticed."
-        ],
-        "Money": [
-            "That sounds like a real consideration.",
-            "You can note one practical detail about it.",
-            "What feels most present about it right now?",
-            "One small step you want to keep in mind?"
-        ],
-        "Sleep": [
-            "Rest has a way of coloring the day. Anything else you want to say?",
-            "You can note how sleep played into today.",
-            "One small detail about rest you want to keep?",
-            "How did your rest shape the day?",
-            "You can jot how your energy felt.",
-            "What do you want to remember about sleep today?",
-            "You can add one line about rest and mood."
-        ],
-        "Creativity": [
-            "That’s part of your creative thread.",
-            "What do you want to remember about it?",
-            "You can note one small step you took.",
-            "How did creating leave you feeling?"
-        ],
+    // Generic open-ended prompts with explicit interrogatives (Phase 5)
+    private let genericOpenFallbacks: [String] = [
+        "What’s one thing you want to remember about this?",
+        "What’s one small detail you want to remember?",
+        "What feels most present right now?",
+        "You can add a line if you want."
     ]
 
-    // MARK: - Utilities (punctuation, capture cleaning, recall formatting, diagnostics)
+    // MARK: - Utilities
 
     fileprivate enum Punctuation {
-        /// Collapse multiple spaces, trim, collapse repeated terminal punctuation, normalize spaces before punctuation.
         static func tidy(_ s: String) -> String {
             var out = s.replacingOccurrences(of: #"[\u2018\u2019]"#, with: "'", options: .regularExpression)
             out = out.replacingOccurrences(of: #"[\u201C\u201D]"#, with: "\"", options: .regularExpression)
@@ -778,22 +724,16 @@ public final class ActiveListenerEnginePro {
     fileprivate enum CaptureSanitizer {
         static func clean(_ s: String) -> String {
             var out = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Remove duplicated leading punctuation spaces like ",  and"
             out = out.replacingOccurrences(of: #"^,\s*"#, with: ", ", options: .regularExpression)
-            // Avoid trailing sentence punctuation that would double-up with host punctuation
             out = out.replacingOccurrences(of: #"[.!?]+$"#, with: "", options: .regularExpression)
-            // Collapse inner multiple spaces
             out = out.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
             return out
         }
     }
 
     fileprivate enum RecallFormatter {
-        /// Convert a first-person snippet into a second-person, no-quotes sentence.
         static func toSecondPerson(from snippet: String) -> String {
             var s = stripQuotes(snippet)
-
-            // Ordered replacements with word boundaries; case-insensitive.
             s = rep(s, #"\bI was\b"#, "you were")
             s = rep(s, #"\bI am\b"#, "you are")
             s = rep(s, #"\bI'm\b"#, "you're")
@@ -806,12 +746,10 @@ public final class ActiveListenerEnginePro {
             s = rep(s, #"\bmine\b"#, "yours")
             s = rep(s, #"\bMe\b"#, "You")
             s = rep(s, #"\bme\b"#, "you")
-            s = rep(s, #"\bI\b"#, "you") // keep last
-
+            s = rep(s, #"\bI\b"#, "you")
             s = ActiveListenerEnginePro.Punctuation.tidy(s)
             return s
         }
-
         private static func stripQuotes(_ s: String) -> String {
             var out = s
             let quoteChars = CharacterSet(charactersIn: "\"'“”‘’")
@@ -826,11 +764,9 @@ public final class ActiveListenerEnginePro {
         }
     }
 
-    // MARK: - Stage 3 Diagnostics (grammar/punctuation/capitalization counters)
+    // MARK: - Diagnostics (unchanged API from Phase 4; optional for your rig)
 
     public enum Diagnostics {
-        /// Evaluate a list of ALR strings and return aggregate issue counts.
-        /// - Returns: (grammar, punctuation, capitalization)
         public static func evaluate(alrs: [String]) -> (grammar: Int, punctuation: Int, capitalization: Int) {
             var g = 0, p = 0, c = 0
             for s in alrs {
@@ -840,59 +776,35 @@ public final class ActiveListenerEnginePro {
             }
             return (g, p, c)
         }
-
-        // Very lightweight, explainable heuristics (deterministic, offline).
         private static func grammarIssues(in s: String) -> Int {
             var count = 0
             let checks: [String] = [
-                #"\byou was\b"#,      // pronoun agreement
-                #"\byou is\b"#,
-                #"\bthe the\b"#,      // duplicate determiners
-                #"\ba a\b"#,
-                #"\ban an\b"#,
-                #"\bcan can\b"#,
-                #"\bto to\b"#,
+                #"\byou was\b"#, #"\byou is\b"#, #"\bthe the\b"#,
+                #"\ba a\b"#, #"\ban an\b"#, #"\bcan can\b"#, #"\bto to\b"#
             ]
-            for pat in checks {
-                count += regexCount(s, pat)
-            }
+            for pat in checks { count += regexCount(s, pat) }
             return count
         }
-
         private static func punctuationIssues(in s: String) -> Int {
             var count = 0
             let checks: [String] = [
-                #"\.\."#,           // double periods
-                #"[!?]{2,}"#,       // repeated ! or ?
-                #"\s+[,.!?]"#,      // space before punctuation
-                #"['“”‘’][^'“”‘’]*$"#, // unmatched opening quote to end
+                #"\.\."#, #"[!?]{2,}"#, #"\s+[,.!?]"#, #"['“”‘’][^'“”‘’]*$"#
             ]
             for pat in checks { count += regexCount(s, pat) }
-            // Missing terminal punctuation (simple): count 1 if ends without .!?
-            if !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-               !s.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix(".") &&
-               !s.hasSuffix("!") && !s.hasSuffix("?") {
-                count += 1
-            }
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty && !t.hasSuffix(".") && !t.hasSuffix("!") && !t.hasSuffix("?") { count += 1 }
             return count
         }
-
         private static func capitalizationIssues(in s: String) -> Int {
             var count = 0
-            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                // If first visible letter is lowercase (and not starting with quote)
-                if let firstLetter = trimmed.first(where: { $0.isLetter }) {
-                    if firstLetter.isLowercase && !"\"'“”‘’".contains(trimmed.first!) {
-                        count += 1
-                    }
-                }
-                // Lone lowercase " i " as pronoun (not in "i'm")
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty {
+                if let firstLetter = t.first(where: { $0.isLetter }),
+                   firstLetter.isLowercase && !"\"'“”‘’".contains(t.first!) { count += 1 }
                 count += regexCount(s, #"(?<![A-Za-z])i(?![A-Za-z])"#)
             }
             return count
         }
-
         private static func regexCount(_ s: String, _ pattern: String) -> Int {
             let rx = try! NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
             let range = NSRange(location: 0, length: (s as NSString).length)
