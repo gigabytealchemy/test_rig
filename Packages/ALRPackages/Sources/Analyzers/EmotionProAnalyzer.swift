@@ -1,401 +1,266 @@
-// RuleEmotionClassifierPro.swift
+// DomainProAnalyzer.swift
 //
-// Production-lean, privacy-first rule-based emotion classifier for journaling.
-// - Deterministic, fast, no network, no telemetry
-// - 8-way output: 1 Joy, 2 Sadness, 3 Anger, 4 Fear, 5 Surprise, 6 Disgust, 7 Neutral, 8 Mixed
-// - Heuristics: lexicons, pattern boosts, negation windows, intensifiers/dampeners,
-//   contrastive connectors (prefer clause after "but/however/though"), emoji cues,
-//   punctuation amplifiers, repetition de-noising, and light stemming.
-// - Tunables collected at the top; extend lexicons safely without changing logic.
+// Production-lean rule-based domain classifier (18 domains) for journaling text.
+// Deterministic, fast, private (no network). Multi-cue scoring.
 //
-// Integration examples:
-// let clf = RuleEmotionClassifierPro()
-// let result = clf.classify("I regret not calling back. I'm worried I made it worse.")
-// print(result.id, result.label, result.scores) // => 4 Fear, with scores per bucket
+// Domains / IDs:
+//  1 Exercise/Fitness, 2 Family, 3 Friends, 4 Relationships/Marriage/Partnership,
+//  5 Love/Romance, 6 Food/Eating, 7 Sleep/Rest, 8 Health/Medical,
+//  9 Work/Career, 10 Money/Finances, 11 School/Learning, 12 Spirituality/Religion,
+//  13 Recreation/Leisure, 14 Travel/Nature, 15 Creativity/Art,
+//  16 Community/Society/Politics, 17 Technology/Media/Internet, 18 Self/Growth/Habits
 //
-// Test Rig adapter (see bottom): EmotionProAnalyzer conforms to your Analyzer API.
-// If names differ, adjust the small adapter only.
+// Design:
+// - Large keyword lexicons + phrase regex boosts (dialects/variants included).
+// - Last sentence bonus (journals often summarize at the end).
+// - Returns top-1 domain with scores; choose threshold externally if you want "Mixed".
 //
-import CoreTypes
+// Integration in Test Rig (Analyzer):
+//   let out = DomainProAnalyzer().analyze(input)
+//   -> AnalyzerOutput.result = "9 – Work/Career"
+//
+
 import Foundation
 
-public final class RuleEmotionClassifierPro: @unchecked Sendable {
-    // MARK: - Public model
+public final class DomainClassifierPro {
+
     public struct Result: Sendable {
-        public let id: Int               // 1..8
-        public let label: String         // "Joy 🙂" etc
-        public let scores: [Int: Double] // raw scores per id (1..7); 8 is Mixed only
+        public let id: Int
+        public let label: String
+        public let scores: [Int: Double]
     }
 
-    public init() { loadExternalLexicon() }
+    // Tunables
+    private let phraseHit: Double = 2.5
+    private let keywordHit: Double = 1.0
+    private let lastSentenceBonus: Double = 1.5
+    private let minReportScore: Double = 0.5
 
-    // MARK: - Tunables
-    private let clauseAfterContrastWeight: Double = 1.20 // emphasize the clause after BUT/HOWEVER/THOUGH
-    private let negationWindow: Int = 3                  // tokens before a hit that invert or dampen
-    private let intensifierMul: Double = 1.6
-    private let dampenerMul: Double = 0.7
-    private let exclaimAmpPerBang: Double = 0.12         // add % per '!'
-    private let capsBoost: Double = 0.15                 // if token is ALLCAPS and length>2
-    private let mixedMargin: Double = 0.28               // within 22% of top → Mixed
-/**
-    // MARK: - Lexicons (extendable)
-    // Use lowercased stems (e.g., "grateful", "gratitu" unnecessary). We also stem lightly below.
-    private var joy: Set<String> = [
-        "proud","grateful","gratitude","relief","relieved","glad","joy","happy","happiness","excited","content","appreciate","win","celebrate","satisfied","satisfaction",
-        "elated","ecstatic","overjoyed","thrilled","cheerful","cheer","uplifted","upbeat","optimistic","hopeful","positive","energized","energise","inspired","inspire","fulfilled",
-        // Dialects/slang/UK/Aus/US
-        "stoked","buzzing","amped","pumped","over the moon","chuffed","well chuffed","proper chuffed","made up","delighted","thrilled","ecstatic","elated","overjoyed","cheered","lifted","heartened",
-    ]
-    
-    private var sadness: Set<String> = [
-        "sad","sadness","regret","miss","missing","lonely","alone","loss","losing","grief","heartbroken","devastated","bereft","sorrow","mourn","mourning","blue","down","low","flat","drained","burnt out","burned out","exhausted","knackered","shattered","gutted","downcast","disappointed","let down", "disheartened","dispirited","demoralized","unhappy","unfulfilled","unmotivated","uninterested","unenthusiastic","unexcited","unmoved","unimpressed","down in the dumps","bored","boring","boredom","monotony","monotonous","tedious","tedium","dragged", "nostalgic","nostalgia","homesick","homesickness"
-    ]
-    private var anger: Set<String> = [
-        "angry","anger","furious","mad","irritated","annoyed","peeved","pissed off","cheesed off","miffed","rage","seething","fuming","livid","resent","resentful","unfair","injustice","betray","crossed a line","frustrat","wound up", "fed up","sick of","had enough","ticked off","riled up","worked up","boiling point","boiling over","blown up","blowing up","blow up","blasted","frustrated","frustrating","frustration"
-    ]
-    private var fear: Set<String> = [
-        "afraid","scared","fear","anxious","anxiety","worried","worry","nervous","on edge","jittery","overwhelm","overwhelmed","panic","panicked","terrified","petrified","dread","uneasy","apprehensive", "apprehension","phobia","freaked out","freaking out","freak out","spooked","spooked out","shaken up","shook up","distressed","distress","distressing","distressed out","distress out", "paranoid","paranoia","creeped out","concern","concerned","worrying"
-    ]
-    private var surprise: Set<String> = [
-        "surprised","shocked","shock","sudden","unexpected","didn't expect","did not expect","out of nowhere","whoa","wow","gobsmacked","flabbergasted","stunned","took me by surprise", "taken aback","astonished","amazed","astounded","flummoxed","baffled","bewildered","dumbfounded","staggered","unbelievable","unforeseen","unanticipated"
-    ]
-    private var disgust: Set<String> = [
-        "disgust","disgusted","gross","nasty","repulsed","revolting","can't stand","cannot stand","yuck","eww","icky","vile","minging","manky","rank","foul","nauseous","sickening", "sickened","appalled","abhorrent","repellent","repugnant","loathsome","detestable","detest","loathe","revulsion","revulsed","turned off","turned off by"
-    ]
-    private var neutral: Set<String> = [
-        "note","noticed","observing","log","track","journal","record","write","today","this morning","this evening","update","check-in","check in"
-    ]
-*/
-    
-    // Use lowercase; lightStem() will also catch ing/ed/ly/ies/s
-    private var joy: Set<String> = [
-      "proud","grateful","gratitude","relief","relieved","glad","joy","happy","happiness",
-      "excited","content","appreciate","overjoyed","thrilled","delighted","stoked","buzzing",
-      "chuffed","ecstatic","elated","satisfied","satisfaction","celebrate","celebrat","fun"
+    public init() {}
+
+    // Labels
+    private let labels: [Int: String] = [
+        1:"Exercise/Fitness", 2:"Family", 3:"Friends", 4:"Relationships/Marriage/Partnership",
+        5:"Love/Romance", 6:"Food/Eating", 7:"Sleep/Rest", 8:"Health/Medical",
+        9:"Work/Career", 10:"Money/Finances", 11:"School/Learning", 12:"Spirituality/Religion",
+        13:"Recreation/Leisure", 14:"Travel/Nature", 15:"Creativity/Art",
+        16:"Community/Society/Politics", 17:"Technology/Media/Internet", 18:"Self/Growth/Habits"
     ]
 
-    private var sadness: Set<String> = [
-      "sad","sadness","regret","miss","missing","lonely","alone","loss","losing","grief",
-      "heartbroken","down","blue","low","drained","exhausted","tired","bored","boring","boredom",
-      "monotony","monotonous","tedious","tedium","homesick","homesickness","nostalgic","nostalgia",
-      "disappointed","let down","gutted","bereft","shattered","knackered"
-    ]
-
-    private var anger: Set<String> = [
-      "angry","anger","furious","mad","irritated","annoyed","peeved","pissed off","miffed","rage",
-      "seething","fuming","livid","resent","resentful","unfair","injustice","betray","crossed a line",
-      "frustrat","frustrated","frustrating","frustration","wound up"
-    ]
-
-    private var fear: Set<String> = [
-      "afraid","scared","fear","anxious","anxiety","worried","worry","nervous","on edge","jittery",
-      "overwhelm","overwhelmed","panic","panicked","terrified","petrified","dread","uneasy",
-      "apprehensive","concern","concerned","worrying"
-    ]
-
-    private var surprise: Set<String> = [
-      "surprised","shocked","shock","sudden","unexpected","didn't expect","did not expect",
-      "out of nowhere","whoa","wow","gobsmacked","flabbergasted","stunned","took me by surprise"
-    ]
-
-    private var disgust: Set<String> = [
-      "disgust","disgusted","gross","nasty","repulsed","revolting","can't stand","cannot stand",
-      "yuck","eww","icky","vile","minging","manky","rank","foul","nauseous","sickening"
-    ]
-
-    // Keep neutral tokens — they matter for low-affect entries.
-    // (We previously removed their scoring entirely; that caused many mismatches.)
-    private var neutral: Set<String> = [
-      "note","noticed","observing","log","track","journal","record","write",
-      "today","this morning","this evening","update","check-in","check in"
-    ]
-    
-    
-    // High-precision patterns (regex) → direct boosts
-    private lazy var patterns: [(NSRegularExpression, (inout [Int: Double]) -> Void)] = {
-        func rx(_ p: String) -> NSRegularExpression { try! NSRegularExpression(pattern: p, options: [.caseInsensitive]) }
-        return [
-            // Life-event joy
-            (rx(#"\b(?:first )?birthday\b"#), { $0[1, default:0] += 3 }),
-            (rx(#"\banniversar(?:y|ies)\b"#), { $0[1, default:0] += 2.5 }),
-            (rx(#"\bmilestone\b"#), { $0[1, default:0] += 1.5 }),
-            (rx(#"\bhad a blast\b"#), { $0[1, default:0] += 3 }),
-            (rx(#"\bso happy\b"#), { $0[1, default:0] += 2.0 }),
-
-            // Regret → Sadness
-            (rx(#"\bi regret\b"#), { $0[2, default:0] += 3 }),
-
-            // Frustration → Anger (but not "not frustrated")
-            (rx(#"(?<!not )\bfrustrat(?:ed|ing|ion)?\b"#), { $0[3, default:0] += 3.0 }),
-
-            // Concern → Fear
-            (rx(#"\bconcern(?:ed|ing)?\b"#), { $0[4, default:0] += 2.0 }),
-
-            // Nostalgia → Sadness (mild)
-            (rx(#"\bnostalg(?:ic|ia)\b"#), { $0[2, default:0] += 1.8 }),
-
-            // Surprise
-            (rx(#"\b(didn'?t expect|out of nowhere|sudden(?:ly)?)\b"#), { $0[5, default:0] += 2.5 }),
-
-            // Disgust
-            (rx(#"\b(disgust(?:ed|ing)?|gross|can't stand|cannot stand)\b"#), { $0[6, default:0] += 3 }),
-
-            // Slang: "mad good/fun/..." is positive — damp anger if any
-            (rx(#"\bmad (?:good|fun|love|respect|skills?)\b"#), { scores in
-                scores[1, default:0] += 1.2
-                scores[3, default:0] -= 1.0
-            })
-        ]
+    // Keyword seeds (extended; lowercased)
+    private lazy var keywords: [Int: Set<String>] = {
+        seedKeywords().mapValues { Set($0) }
     }()
 
-    private let intensifiers: Set<String> = [
-        "very","really","so","extremely","totally","incredibly","soooo","super","mega","proper","dead","well", "absolutely","completely","thoroughly","utterly","highly","exceedingly","overly","excessively","intensely","intense","intensified","intensifying","intensifier","intensifiers","intensify"
-    ]
-    private let dampeners: Set<String>   = [
-        "a bit","kind of","kinda","slightly","somewhat","a little","sort of","ish","low-key","lowkey", "not really","not that","not too","not very","not much","not really that","not really very"
-    ]
-    private let negators: Set<String>     = [
-        "not","never","no","hardly","barely","scarcely","isn't","isnt","aren't","arent","don't","dont","didn't","didnt","cannot","can't","cant","ain't","ain’t","won't","wont"
-    ]
+    // Phrase regex seeds
+    private lazy var phraseRegex: [Int: [NSRegularExpression]] = {
+        seedPhrases().mapValues { arr in arr.map { try! NSRegularExpression(pattern: $0, options: [.caseInsensitive]) } }
+    }()
 
-    // Emoji → boosts
-    private let emojiMap: [Character: Int] = [
-        "🙂":1, "😊":1, "😄":1, "😁":1, "🥳":1,
-        "😢":2, "😭":2, "😔":2,
-        "😠":3, "😡":3, "🤬":3,
-        "😨":4, "😰":4, "😱":4,
-        "😮":5, "😲":5, "🤯":5,
-        "🤢":6, "🤮":6, "😖":6
-    ]
-
-    // MARK: - Classify
     public func classify(_ text: String) -> Result {
-        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return Result(id: 7, label: labelFor(7), scores: [7:1])
-        }
+        let t = text.lowercased()
+        let parts = splitSentences(text)
+        var scores: [Int: Double] = [:]
 
-        // 1) Normalize & split into clauses; prioritize clause after contrast
-        let normalized = normalize(text)
-        let (priorityClause, otherClauses) = prioritizeAfterContrast(normalized)
-
-        // 2) Score clauses (priority weighted)
-        var scores: [Int: Double] = [:] // 1..7
-        scoreClause(priorityClause, into: &scores, weight: clauseAfterContrastWeight)
-        for clause in otherClauses { scoreClause(clause, into: &scores, weight: 1.0) }
-
-        // 3) Emoji & punctuation amplifiers (whole text)
-        amplifyFromEmojiAndPunct(in: normalized, scores: &scores)
-
-        // 4) Fallback neutral if no signal
-        if scores.values.allSatisfy({ $0 == 0 }) { scores[7] = 1 }
-
-        // 5) Decide winner or Mixed based on margin and opposing valence
-        let sorted = scores.sorted { $0.value > $1.value }
-        let top = sorted.first!
-        let second = sorted.dropFirst().first ?? (7, 0.0)
-
-        // Opposing-valence Mixed rule: Joy vs (Anger|Fear|Sadness) both present
-        let joyScore = scores[1] ?? 0
-        let negMax  = max(scores[2] ?? 0, scores[3] ?? 0, scores[4] ?? 0)
-        let mixedOpposing = (joyScore > 0.8 && negMax > 0.8) &&
-                            ((abs(joyScore - negMax) / max(1.0, max(joyScore, negMax))) < 0.55)
-
-        let isMixed = mixedOpposing || (second.1 > 0 && (top.1 - second.1) / max(1.0, top.1) < mixedMargin)
-        let id = isMixed ? 8 : top.0
-        return Result(id: id, label: labelFor(id), scores: scores)
-    }
-
-    // MARK: - External lexicon overlay (optional)
-    private struct LexiconPack: Decodable {
-        let joy: [String]?
-        let sadness: [String]?
-        let anger: [String]?
-        let fear: [String]?
-        let surprise: [String]?
-        let disgust: [String]?
-        let neutral: [String]?
-        let intensifiers: [String]?
-        let dampeners: [String]?
-        let negators: [String]?
-    }
-
-    private func loadExternalLexicon(filename: String = "EmotionLexicon", ext: String = "json") {
-        #if canImport(Foundation)
-        if let url = Bundle.main.url(forResource: filename, withExtension: ext),
-           let data = try? Data(contentsOf: url),
-           let pack = try? JSONDecoder().decode(LexiconPack.self, from: data) {
-            if let v = pack.joy { joy.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.sadness { sadness.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.anger { anger.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.fear { fear.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.surprise { surprise.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.disgust { disgust.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.neutral { neutral.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.intensifiers { intensifiersOverlay.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.dampeners { dampenersOverlay.formUnion(v.map { $0.lowercased() }) }
-            if let v = pack.negators { negatorsOverlay.formUnion(v.map { $0.lowercased() }) }
-        }
-        #endif
-    }
-
-    private var intensifiersOverlay: Set<String> = []
-    private var dampenersOverlay: Set<String> = []
-    private var negatorsOverlay: Set<String> = []
-
-    // prefer overlay if present
-    private func isIntensifier(_ t: String) -> Bool { intensifiers.contains(t) || intensifiersOverlay.contains(t) }
-    private func isDampener(_ t: String)   -> Bool { dampeners.contains(t) || dampenersOverlay.contains(t) }
-    private func isNegator(_ t: String)     -> Bool { negators.contains(t) || negatorsOverlay.contains(t) }
-
-    // MARK: - Clause scoring
-    private func scoreClause(_ clause: String, into scores: inout [Int: Double], weight: Double) {
-        guard !clause.isEmpty else { return }
-
-        // Pattern boosts (regex)
-        var local = scores
-        for (rx, bump) in patterns {
-            if rx.firstMatch(in: clause, options: [], range: NSRange(location: 0, length: (clause as NSString).length)) != nil {
-                bump(&local)
-            }
-        }
-
-        // Tokenize & windowed negation/intensity
-        let tokens = tokenize(clause)
-        let n = tokens.count
-        for i in 0..<n {
-            let t = tokens[i]
-            // Determine base bucket(s) by lexicon membership
-            var hits: [Int] = []
-            if inLex(t, joy)      { hits.append(1) }
-            if inLex(t, sadness)  { hits.append(2) }
-            if inLex(t, anger)    { hits.append(3) }
-            if inLex(t, fear)     { hits.append(4) }
-            if inLex(t, surprise) { hits.append(5) }
-            if inLex(t, disgust)  { hits.append(6) }
-            if inLex(t, neutral)  { hits.append(7) }
-            guard !hits.isEmpty else { continue }
-
-            // Check context window for negation & intensity
-            var mul = 1.0
-            var inverted = false
-            // Intensifiers/dampeners anywhere in a small window
-            let lo = max(0, i - negationWindow), hi = min(n - 1, i + negationWindow)
-            for j in lo...hi {
-                let ctx = tokens[j]
-                if isIntensifier(ctx) { mul *= intensifierMul }
-                if isDampener(ctx)    { mul *= dampenerMul }
-                if isNegator(ctx)     { inverted = true }
-                if isAllCaps(tokens[j]) { mul *= (1.0 + capsBoost) }
-            }
-
-            for h in hits {
-                let v = (inverted ? -1.0 : 1.0) * mul
-                local[h, default: 0] += v
-                if inverted { // e.g., "not happy" → damp joy and add to sadness
-                    if h == 1 { local[2, default:0] += abs(v) * 0.8 }
+        // Base keywords
+        for (id, lex) in keywords {
+            for w in lex {
+                if t.contains(w) {
+                    scores[id, default:0] += keywordHit
                 }
             }
         }
 
-        // Apply clause weight and merge into global scores
-        for (k, v) in local { scores[k, default:0] += v * weight }
-    }
-
-    // MARK: - Emoji & punctuation
-    private func amplifyFromEmojiAndPunct(in text: String, scores: inout [Int: Double]) {
-        for ch in text { if let id = emojiMap[ch] { scores[id, default:0] += 1.0 } }
-        let bangs = text.filter { $0 == "!" }.count
-        if bangs > 0 {
-            // Prefer boosting Joy if there is any positive signal; else Surprise; else current top
-            let hasJoy = (scores[1] ?? 0) > 0
-            let hasSurprise = (scores[5] ?? 0) > 0
-            let target = hasJoy ? 1 : (hasSurprise ? 5 : (scores.sorted { $0.value > $1.value }.first?.key ?? 5))
-            scores[target, default:0] += Double(bangs) * exclaimAmpPerBang * max(1.0, scores[target] ?? 1.0)
-        }
-        // many question marks can lean Surprise a bit
-        let qs = text.filter { $0 == "?" }.count
-        if qs >= 2 { scores[5, default:0] += 0.5 }
-    }
-
-    // MARK: - Utilities
-    private func labelFor(_ id: Int) -> String {
-        switch id {
-        case 1: return "Joy 🙂"
-        case 2: return "Sadness 😢"
-        case 3: return "Anger 😠"
-        case 4: return "Fear 😨"
-        case 5: return "Surprise 😮"
-        case 6: return "Disgust 🤢"
-        case 8: return "Mixed 😵‍💫"
-        default: return "Neutral 😐"
-        }
-    }
-
-    private func normalize(_ s: String) -> String {
-        // Lowercase, collapse whitespace, keep emoji/punct
-        let low = s.lowercased()
-        let collapsed = low.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        return collapsed
-    }
-
-    private func prioritizeAfterContrast(_ text: String) -> (String, [String]) {
-        // Split on contrastive connectives and give the last clause priority
-        let markers = [" but ", " however ", " though "]
-        for m in markers {
-            if text.contains(m), let r = text.range(of: m) {
-                let after = String(text[r.upperBound...]).trimmingCharacters(in: .whitespaces)
-                let before = String(text[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
-                return (after, [before])
+        // Phrase boosts
+        for (id, regs) in phraseRegex {
+            for r in regs {
+                if r.firstMatch(in: t, options: [], range: NSRange(location: 0, length: t.utf16.count)) != nil {
+                    scores[id, default:0] += phraseHit
+                }
             }
         }
-        return (text, [])
-    }
 
-    private func tokenize(_ s: String) -> [String] {
-        // Keep simple tokens; join certain phrases beforehand
-        let joined = s.replacingOccurrences(of: "out of nowhere", with: "out_of_nowhere")
-        return joined.split{ !$0.isLetter && !$0.isNumber && $0 != "_" }.map(String.init)
-    }
-
-    private func inLex(_ token: String, _ set: Set<String>) -> Bool {
-        if set.contains(token) { return true }
-        // light stemming: drop common suffixes
-        let stem = lightStem(token)
-        if set.contains(stem) { return true }
-        // phrase-like entries (e.g., "can't stand") handled earlier via regex; but also check joined underscore
-        return false
-    }
-
-    private func lightStem(_ t: String) -> String {
-        var s = t
-        for suf in ["ing","ed","ly","ies","s"] {
-            if s.hasSuffix(suf) && s.count > suf.count + 2 { s.removeLast(suf.count); break }
+        // Last sentence emphasis
+        if let last = parts.last?.lowercased() {
+            for (id, reg) in phraseRegex {
+                for r in reg {
+                    if r.firstMatch(in: last, options: [], range: NSRange(location: 0, length: last.utf16.count)) != nil {
+                        scores[id, default:0] += (lastSentenceBonus - 1.0) * phraseHit
+                    }
+                }
+            }
+            for (id, lex) in keywords {
+                for w in lex where last.contains(w) {
+                    scores[id, default:0] += (lastSentenceBonus - 1.0) * keywordHit
+                }
+            }
         }
-        return s
+
+        // Pick winner
+        let sorted = scores.sorted { $0.value > $1.value }
+        guard let top = sorted.first, top.value >= minReportScore else {
+            // fall back to the strongest anyway to avoid "General" dumping; label will still reflect top domain
+            let fallback = sorted.first ?? (9, 0.0) // Work default if nothing found
+            return Result(id: fallback.0, label: labels[fallback.0] ?? "Unknown", scores: scores)
+        }
+        return Result(id: top.0, label: labels[top.0] ?? "Unknown", scores: scores)
     }
 
-    private func isAllCaps(_ t: String)     -> Bool { let letters = t.filter{ $0.isLetter }; return !letters.isEmpty && letters.allSatisfy{ $0.isUppercase } && t.count > 2 }
+    // MARK: Seeds
+
+    // Extended starter keywords
+    private func seedKeywords() -> [Int: [String]] {
+        return [
+            1: [ // Exercise/Fitness
+                "run","ran","running","jog","jogging","gym","workout","work out","exercise","lift","lifting","weights",
+                "squat","bench","deadlift","stretch","yoga","pilates","swim","swimming","bicycle","cycling","bike",
+                "steps","walk","walking","hike","hiking","cardio","spin","spinning","class","coach","trainer",
+                "pb","personal best","aerobics","zumba","crossfit","rowing","elliptical","treadmill","fitness",
+                "training","athletic","sports","soccer","football","basketball","tennis","rugby","cricket","hiit",
+                "peloton","strava","vo2max","workout video"
+            ],
+            2: [ // Family
+                "mother","mom","mum","mama","mommy","father","dad","daddy","parents","parenting","sister","brother",
+                "siblings","daughter","son","kids","child","children","grandma","grandpa","grandparent","in-law",
+                "inlaws","cousin","aunt","uncle","niece","nephew","family","relative","kin","folks","household",
+                "stepmom","stepdad","stepsister","stepbrother"
+            ],
+            3: [ // Friends
+                "friend","friends","bestie","mate","pal","buddy","bros","crew","squad","circle","gang","hang out",
+                "hangout","catch up","caught up","girls night","guys night","brunch","pub","bar","party","gathering"
+            ],
+            4: [ // Relationships/Marriage/Partnership
+                "partner","spouse","husband","wife","fiancé","fiance","fiancée","boyfriend","girlfriend","bf","gf",
+                "relationship","marriage","wed","wedding","anniversary","argued","argue","fight","fought","counseling",
+                "counselling","couples","date night","domestic","commitment","union","bond","divorce","separation"
+            ],
+            5: [ // Love/Romance
+                "love","lover","crush","romance","romantic","kiss","kissing","intimate","intimacy","sex","sexual",
+                "make out","made out","flirt","flirting","chemistry","spark","passion","affection","beloved","desire"
+            ],
+            6: [ // Food/Eating
+                "eat","ate","eating","meal","breakfast","brunch","lunch","dinner","snack","snacked","bake","baked",
+                "cook","cooked","cooking","recipe","restaurant","cafe","café","takeout","take-away","delivery",
+                "diet","calorie","protein","carb","vegan","vegetarian","gluten-free","cupcake","cake","pizza","pasta",
+                "burger","sandwich","supper","feast","buffet","sushi","doughnut","donut","ice cream","barbecue","bbq",
+                "family dinner"
+            ],
+            7: [ // Sleep/Rest
+                "sleep","slept","sleeping","nap","napped","tired","exhausted","insomnia","rest","bedtime","woke","wake",
+                "awake","dream","dreamt","dreamed","nightmare","restless","siesta","slumber","doze","snooze"
+            ],
+            8: [ // Health/Medical
+                "health","healthy","doctor","gp","clinic","hospital","er","a&e","urgent care","nurse","dentist","therapist",
+                "therapy","counselor","physio","physical therapy","pt","meds","medicine","rx","prescription","diagnos",
+                "symptom","bp","blood pressure","cholesterol","heart rate","injury","injured","surgery","sore","ache",
+                "pain","migraine","cold","flu","checkup","vaccination","vaccine","illness","disease","wellness",
+                "treatment","well-being","wellbeing","self-care","self care"
+            ],
+            9: [ // Work/Career
+                "work","worked","working","job","career","office","boss","manager","coworker","colleague","deadline",
+                "deliverable","project","assignment","task","submission","progress","review","client","gig","freelance",
+                "remote","online work","shift","schedule","launch","ship","ticket","jira","email","slack","report",
+                "kpi","okr","okrs","org chart","reorg","pull request","merge","commit","meeting","standup","retro"
+            ],
+            10: [ // Money/Finances
+                "money","finance","finances","budget","budgeting","paycheck","salary","wage","wages","paid","unpaid",
+                "bonus","rent","mortgage","loan","debt","credit","credit card","bank","savings","invest","investment",
+                "investing","stocks","shares","bills","bill","tax","irs","hmrc","superannuation","interest","dividend",
+                "pension","retirement","crypto","bitcoin","ethereum","direct deposit","late fee","earnings","income",
+                "profit","cash","goal","make money","pay bills","earnings goal"
+            ],
+            11: [ // School/Learning
+                "school","class","classes","lecture","seminar","study","studying","homework","assignment","exam","quiz",
+                "midterm","final","project","teacher","prof","professor","tutor","grade","gpa","research","thesis",
+                "dissertation","paper","essay","campus","course","lesson","learning","curriculum","group project"
+            ],
+            12: [ // Spirituality/Religion
+                "god","gods","faith","pray","prayer","church","mass","mosque","temple","synagogue","spiritual",
+                "spirituality","bible","quran","koran","torah","meditate","meditation","mindful","mindfulness","retreat",
+                "sunday service","hymn","worship","belief","soul","spirit","quiet time with god"
+            ],
+            13: [ // Recreation/Leisure
+                "movie","film","cinema","tv","series","show","netflix","hulu","disney+","disney plus","hbomax","max","prime",
+                "board game","boardgame","puzzle","craft","knit","knitting","garden","gardening","park","beach","pool",
+                "outing","festival","concert","gig","sports","stadium","match","team","league","game night","movie night",
+                "live music"
+            ],
+            14: [ // Travel/Nature
+                "travel","trip","holiday","vacation","staycation","flight","airport","airplane","plane","train","road trip",
+                "roadtrip","drive","drove","bus","bike tour","camp","camping","hike","trail","forest","woods","mountain",
+                "lake","river","ocean","sea","nature","outdoors","journey","itinerary","adventure","national park"
+            ],
+            15: [ // Creativity/Art
+                "create","creative","creativity","write","writing","wrote","draft","poem","poetry","novel","story","paint",
+                "painting","draw","drawing","sketch","design","compose","song","music","practice","rehearsal","studio",
+                "art","gallery","exhibit","photography","photo","film-making","craft","handmade","writer's block","first draft"
+            ],
+            16: [ // Community/Society/Politics
+                "community","neighborhood","neighbourhood","volunteer","volunteering","charity","fundraiser","election",
+                "vote","voted","politics","policy","protest","march","rally","civic","council","local news","news",
+                "headline","crime","safety","public","government","parliament","senate","congress","food bank"
+            ],
+            17: [ // Technology/Media/Internet
+                "phone","screen","scroll","scrolled","scrolling","social","socials","social media","facebook","instagram","ig",
+                "tiktok","twitter","x.com","youtube","reddit","discord","slack","email","inbox","notifications","app","apps",
+                "game","gaming","console","pc","mac","iphone","android","laptop","online","offline","internet","web","digital",
+                "zoom","teams","facetime","doomscroll","doomscrolling","screen time","inbox zero"
+            ],
+            18: [ // Self/Growth/Habits
+                "goal","goals","habit","habits","streak","journal","journaling","therapy homework","self-care","self care",
+                "routine","morning routine","evening routine","reflection","reflect","intent","intentions","affirmation",
+                "vision","plan","planning","review","check-in","check in","track","tracked","on track","back on track",
+                "resolution","challenge","growth","mindset","practice","personal development","self improvement"
+            ]
+        ]
+    }
+
+    private func seedPhrases() -> [Int: [String]] {
+        return [
+            1: [ #"\\b(5k|10k|marathon|half marathon)\\b"#, #"\\bpersonal best\\b"# ],
+            2: [ #"\\b(first )?birthday\\b"#, #"\\bfamily (dinner|gathering|reunion)\\b"# ],
+            4: [ #"\\bdate night\\b"#, #"\\bmarriage counseling|couples therapy\\b"# ],
+            6: [ #"\\b(gluten[- ]free|dairy[- ]free|vegan|vegetarian)\\b"#, #"\\bhome[- ]cooked\\b"# ],
+            9: [ #"\\b(first|back) day back to work\\b"#, #"\\b(work(ed)? online)\\b"#, #"\\b(an assignment.*rejected)\\b"#, #"\\bcode review\\b"# ],
+            10:[ #"\\b(earnings goal)\\b"#, #"\\b(pay(ing)? bills)\\b"#, #"\\b(make money)\\b"#, #"\\bdirect deposit\\b"# ],
+            11:[ #"\\bfinal exam\\b"#, #"\\bpeer review\\b"#, #"\\bgroup project\\b"# ],
+            12:[ #"\\bsunday service\\b"#, #"\\b(quiet )?time with god\\b"# ],
+            13:[ #"\\bmovie night\\b"#, #"\\bgame night\\b"#, #"\\blive music\\b"# ],
+            14:[ #"\\broad (?:trip|trips)\\b"#, #"\\bnational park\\b"# ],
+            15:[ #"\\bwriter'?s block\\b"#, #"\\bfirst draft\\b"# ],
+            16:[ #"\\b(voted|vote|election day)\\b"#, #"\\bfood bank\\b"# ],
+            17:[ #"\\bdoomscroll(?:ing)?\\b"#, #"\\bscreen time\\b"#, #"\\binbox zero\\b"# ],
+            18:[ #"\\b(back|getting) on track\\b"#, #"\\bmorning routine\\b"# ]
+        ]
+    }
+
+    // MARK: Utils
+
+    private func splitSentences(_ text: String) -> [String] {
+        let rough = text.replacingOccurrences(of: "\n", with: " . ")
+        let parts = rough.split(whereSeparator: { ".!?".contains($0) }).map { String($0).trimmingCharacters(in: .whitespaces) }
+        return parts.filter { !$0.isEmpty }
+    }
+
+    private func labelFor(_ id: Int) -> String { labels[id] ?? "Unknown" }
 }
 
-// MARK: - Test Rig Adapter (Analyzer)
-// Conforms to a simple Analyzer API used by your macOS Test Rig. Adjust names if needed.
-// Expecting types similar to:
-//   public enum AlgorithmCategory { case emotion, activeListening, title, prompt, domain }
-//   public struct AnalyzerInput { let fullText: String; let selectedRange: Range<String.Index>? }
-//   public struct AnalyzerOutput { let category: AlgorithmCategory; let name: String; let result: String; let metadata: [String:String]? }
+// MARK: - Test Rig Adapter
 
-public struct EmotionProAnalyzer: Analyzer {
-    public let category: AlgorithmCategory = .emotion
-    public let name: String = "Emotion • Rules Pro"
-    private let clf = RuleEmotionClassifierPro()
+public struct DomainProAnalyzer: Analyzer {
+    public let category: AlgorithmCategory = .domain
+    public let name: String = "Domain • Rules Pro"
+    private let clf = DomainClassifierPro()
     public init() {}
 
     public func analyze(_ input: AnalyzerInput) throws -> AnalyzerOutput {
-        let text = (input.selectedRange != nil) ? String(input.fullText[input.selectedRange!]) : input.fullText
+        let text = (input.selectedRange != nil)
+            ? String(input.fullText[input.selectedRange!])
+            : input.fullText
         let res = clf.classify(text)
         let scoreStr = res.scores
-            .sorted{ $0.key < $1.key }
-            .map{ "\($0.key):\(String(format: "%.2f", $0.value))" }
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key):\(String(format: "%.2f", $0.value))" }
             .joined(separator: " • ")
         return AnalyzerOutput(category: category,
                               name: name,
